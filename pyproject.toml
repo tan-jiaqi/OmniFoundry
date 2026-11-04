@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omnifoundry"
+version = "3.0.0"
+description = "Audio-visual joint-reasoning QA data engine: caption -> generate -> verify -> think"
+requires-python = ">=3.10"
+dependencies = ["openai>=2", "pyyaml>=6"]
+
+[project.optional-dependencies]
+scenes = ["scenedetect[opencv]"]
+
+[project.scripts]
+omnifoundry = "omnifoundry.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["omnifoundry*"]

@@ -1,0 +1,151 @@
+# Task catalog: what kinds of questions the engine can ask.
+# The 13 ROV task families follow the OmniQA taxonomy (reference/OmniReasoning/src/OmniQA/generation/task_types.py);
+# definitions here are our own wording. `capabilities` map to the A–I classes in
+# archive/OmniFoundry-next/docs/OMNI_BENCHMARK_DATASET_QA_CAPABILITIES.md.
+#
+# kind: anchor   = a cue in one modality picks the referent; the answer lies in the other modality.
+#       holistic = the answer needs integrating both modalities across a span.
+# Weights and enable lists are set in configs (tasks.weights, catalog.enabled), not here.
+
+tasks:
+  - id: counting
+    route: rov
+    name: Cross-modal counting
+    kind: anchor
+    capabilities: [C]
+    definition: >
+      Ask for an integer count. One modality identifies what to count (or when); the occurrences
+      themselves are only observable in the other modality.
+    rules:
+      - The number must never be stated aloud or written on screen.
+      - Occurrences must be clearly separable in the captions.
+
+  - id: spatial
+    route: rov
+    name: Audio-anchored spatial reasoning
+    kind: anchor
+    capabilities: [E, B2]
+    definition: >
+      Ask where something is on screen, or how it sits relative to something else, where the target
+      can only be identified from what is heard.
+    rules:
+      - The visual description of the target must not appear in the question.
+
+  - id: attribute
+    route: rov
+    name: Audio-anchored visual attribute
+    kind: anchor
+    capabilities: [A2, B1]
+    definition: >
+      Ask for a visual attribute (color, clothing, shape, on-screen text) of a referent that only the
+      audio singles out among visually similar alternatives.
+    rules:
+      - Distractors should be attributes of other entities visible in the same video.
+
+  - id: sound_event
+    route: rov
+    name: Sound and event identification
+    kind: anchor
+    capabilities: [A1, B1]
+    definition: >
+      Identify a sound, event or scene where one modality disambiguates the other: which sound occurs
+      during a visible action, or which action accompanies a distinctive sound.
+    rules:
+      - The sound must be distinctive, not generic background.
+
+  - id: temporal
+    route: rov
+    name: Mixed-modality temporal reasoning
+    kind: anchor
+    capabilities: [D1, D2]
+    definition: >
+      Order 3 to 4 events drawn from both modalities, or locate when an audio-visual event happens
+      relative to another.
+    rules:
+      - Events must be clearly separated in time; avoid overlapping spans.
+
+  - id: prediction
+    route: rov
+    name: What happens next
+    kind: anchor
+    capabilities: [D4]
+    definition: >
+      Given audio and visual context up to a point, ask what happens next, where the continuation is
+      observable in the video and is signalled by the earlier joint context.
+    rules:
+      - The earlier context must make the answer reasonably inferable, not a coin flip.
+
+  - id: causal
+    route: rov
+    name: Cross-modal causal reasoning
+    kind: anchor
+    capabilities: [G1]
+    definition: >
+      Ask why something happened (or what would differ if it had not), where the cause is in one
+      modality and the effect in the other.
+    rules:
+      - The causal link must be supported by the video, not by general world knowledge alone.
+
+  - id: emotion
+    route: rov
+    name: Voice-carried emotion of a visible person
+    kind: anchor
+    capabilities: [F]
+    definition: >
+      A person is picked out visually; the emotion or attitude to identify is carried by their voice.
+    rules:
+      - The transcript words alone must not give the emotion away.
+
+  - id: music
+    route: rov
+    name: Function of non-speech audio
+    kind: holistic
+    capabilities: [F, A1]
+    definition: >
+      Ask how music or sound effects function relative to what is shown (mood shift, emphasis, marking a
+      transition).
+    rules:
+      - Do not build on speech.
+      - Only choose this when the captions contain specific music or sound-effect entries.
+
+  - id: relationship
+    route: rov
+    name: Social and functional relationships
+    kind: holistic
+    capabilities: [G2]
+    definition: >
+      Infer the relationship between people from what they say together with how they interact on screen.
+    rules:
+      - Neither dialogue alone nor visuals alone should settle it.
+
+  - id: consistency
+    route: rov
+    name: Audio-visual consistency
+    kind: anchor
+    capabilities: [I, B1]
+    definition: >
+      Ask which mentioned item actually appears, which spoken statement the visuals contradict, or where
+      audio and visuals disagree.
+    rules:
+      - The mismatch must be explicit in the captions of both modalities.
+
+  - id: reference
+    route: rov
+    name: Spoken reference resolution
+    kind: anchor
+    capabilities: [B2, B3, H]
+    definition: >
+      Bind a spoken mention to one of several visually similar referents, possibly far apart in time.
+    rules:
+      - The link between mention and referent must be established by the video itself.
+
+  - id: summary
+    route: rov
+    name: Joint summary
+    kind: holistic
+    capabilities: [H]
+    definition: >
+      Ask for the option that best summarizes the video, where narration and visuals each contribute
+      facts that the correct option needs.
+    rules:
+      - Distractors should each be correct for only one modality or only part of the video.

@@ -1,0 +1,93 @@
+# Base configuration. Experiments extend this and override only what they change.
+env_file: .env
+run: {workers: 4}
+cache: {dir: cache, enabled: true}
+prompts: {dir: prompts, overrides: {}}
+catalog: {path: catalog/tasks.yaml}
+
+media:
+  ffmpeg: tools/bin/ffmpeg
+  ffprobe: tools/bin/ffprobe
+  work_dir: cache/media
+  overlay: {fps: 2, width: 640}
+
+policies:
+  sampler: stratified
+  selector: llm
+  retry: with_feedback
+
+select:
+  source: omnivideo
+  root: ../datasets/OmniVideo-100K
+  min_duration_s: 30
+  max_duration_s: 600
+  stratify_by: search_tag
+  seed: 0
+  n: 20
+
+caption:
+  planner: gemini        # gemini | scenedetect | fixed
+  max_events: 10
+  max_event_s: 180
+  event_input: clip      # clip | full
+  prior_context_chars: 12000
+
+tasks:
+  weights: {}            # task id -> weight; unset = 1.0, 0 disables
+  max_choices: 2
+
+generate:
+  questions_per_video: 1
+  max_attempts: 3
+  shuffle_options: true
+  checks: [structure, grounding, solver, blind]
+
+verify:
+  checks: [clue, gate_text]
+  short_circuit: true
+
+think: {max_attempts: 2, opening: "Got it!", caption_chars: 14000}
+
+checks:
+  structure: {num_options: 8, min_steps: 2}
+  grounding: {min_overlap: 0.6, min_words: 4, time_slack_s: 2, simultaneity_gap_s: 15, music_tasks: [music]}
+  blind: {trials: 2, temperature: 0.3, max_correct: 0}
+  clue:
+    modalities: [visual]   # M1 baseline; add speech/sound/music to verify audio clues too (M2)
+    min_strength: 0.75
+    pad_s: 2
+    min_len_s: 6
+    max_len_s: 45
+  gate_text: {conditions: [full, audio_only, visual_only], trials: 3, temperature: 0.7, max_correct: 1}
+  gate_media: {conditions: [av, video_only, audio_only], trials: 3, temperature: 0.7, max_correct: 1, window: clues}
+
+# Role -> endpoint. Model ids are defaults to confirm against the gateway before M1 (see README).
+models:
+  defaults:
+    backend: openai
+    base_url: https://api15.xhub.chat/v1
+    api_key_env: WANDOU_API_KEY
+    timeout_s: 600
+    max_retries: 3
+    concurrency: 8
+    max_tokens: 16384
+    temperature: 0
+    # Gateway probe 2026-11-04 (scripts/probe_gateway.py): `video_url` is accepted but the media is dropped and
+    # the model guesses (wrong colors, no error). `file` and `image_url` answered correctly. Do not use video_url.
+    video_format: file
+    audio_format: input_audio
+  planner: {model: gemini-3.1-pro-preview}
+  captioner: {model: gemini-3.1-pro-preview}
+  # Generator comparison 2026-11-04 on 2 news videos (runs/gen-{a,b,c}): deepseek-v4-flash with thinking wrote
+  # the best-grounded questions but needs >16K tokens (some calls 25K) and ~3 min each; with thinking disabled it
+  # is 20x faster but wrote single-modality / answer-leaking questions; gpt-5.6-sol was good but slow too.
+  # Task selection gains nothing from 20K thinking tokens, so it runs without thinking.
+  selector: {model: deepseek-v4-flash, extra_body: {thinking: {type: disabled}}}
+  generator: {model: deepseek-v4-flash, temperature: 0.7, max_tokens: 32768}
+  solver: {model: deepseek-v4-flash}
+  blind: {model: deepseek-v4-flash}
+  clue_visual: {model: gemini-3.5-flash}
+  clue_audio: {model: gemini-3.5-flash}
+  gate_text: {model: gpt-5.6-sol}
+  gate_av: {model: gemini-3.5-flash}
+  thinker: {model: deepseek-v4-flash}

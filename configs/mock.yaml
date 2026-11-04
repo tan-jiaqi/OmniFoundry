@@ -1,0 +1,8 @@
+# Offline dry run: mock model responder + synthetic video. No network, no cost.
+extends: base.yaml
+cache: {dir: runs/_mock_cache}
+media: {work_dir: runs/_mock_cache/media}
+select: {source: manifest, path: runs/_mock_input/manifest.jsonl, n: 2}
+caption: {planner: fixed, fixed_window_s: 10}
+models:
+  defaults: {backend: mock, responder: "tests.mock_responder:respond", model: mock}
