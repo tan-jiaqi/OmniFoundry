@@ -26,8 +26,19 @@ $NP $PY scripts/probe_gateway.py                                        # which 
 $NP $PY -m omnifoundry run --config configs/base.yaml --out runs/m1-001 # add --stages caption,generate to run a subset
 $PY -m omnifoundry funnel runs/m1-001                                   # where candidates were lost, and cost
 $PY -m omnifoundry compare runs/a runs/b                                # A/B any change
-$PY -m omnifoundry review runs/m1-001                                   # review.html for manual spot checks
+$PY -m omnifoundry review-serve runs/m1-001                             # interactive human review (see below)
 ```
+
+### Human review
+
+`review-serve` starts a local page on 127.0.0.1:8765. From your own computer, run `ssh -L 8765:127.0.0.1:8765 <server>` and open http://127.0.0.1:8765.
+
+For each question:
+1. Watch the video and answer it yourself first. The gold answer stays hidden until you pick an option, which measures human accuracy without anchoring.
+2. The gold answer, the clue chain (click a timestamp to seek), the reasoning steps, the automatic tag evidence and the thinking are then shown.
+3. Record a verdict, whether the question really needs both sound and picture, and any issues.
+
+Judgments go to `<run>/reviews.jsonl`, with the previous version kept as `.bak`. `omnifoundry funnel` then reports human accuracy per tag. Shortcuts: A–H answer, Space play/pause, ←/→ 2 s, N/P next/previous, R reveal.
 
 Override any setting with `--set dotted.key=value`, or write `configs/exp-x.yaml` with `extends: base.yaml`.
 

@@ -303,3 +303,41 @@ class TestEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewServer(unittest.TestCase):
+    def test_serve_save_and_range(self):
+        import threading
+        import urllib.request
+        from omnifoundry.analysis import review_server as rs
+        from omnifoundry.jsonio import write_jsonl
+        tmp = Path(tempfile.mkdtemp(prefix="of-review-"))
+        try:
+            video = Media().synth(tmp / "v.mp4", duration=4, segments=[(0, 4, "red", 440)])
+            write_jsonl(tmp / "caption" / "out.jsonl", [{**bundle(), "extra": {"video_path": str(video), "duration_s": 4}}])
+            write_jsonl(tmp / "think" / "out.jsonl", [{**candidate(), "tags": ["av_strict"], "thinking": "Got it!"}])
+            items = rs.load_items(tmp, "think")
+            server = rs.ThreadingHTTPServer(("127.0.0.1", 0), rs.make_handler(tmp, items, tmp / "reviews.jsonl"))
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            data = json.loads(opener.open(base + "/api/items").read())
+            self.assertEqual(data["items"][0]["id"], "q1")
+            self.assertNotIn("video_path", data["items"][0])
+            req = urllib.request.Request(base + "/video/q1", headers={"Range": "bytes=0-99"})
+            resp = opener.open(req)
+            self.assertEqual((resp.status, len(resp.read())), (206, 100))
+            with self.assertRaises(urllib.error.HTTPError):
+                opener.open(base + "/video/..%2F..%2Fetc%2Fpasswd")
+            body = json.dumps({"id": "q1", "human_answer": "A", "verdict": "correct", "needs": "both", "issues": [], "note": "ok"}).encode()
+            resp = json.loads(opener.open(urllib.request.Request(base + "/api/review", data=body, method="POST",
+                                                                 headers={"Content-Type": "application/json"})).read())
+            self.assertEqual(resp["summary"]["blind_correct"], 1)
+            self.assertEqual(read_jsonl(tmp / "reviews.jsonl")[0]["verdict"], "correct")
+            self.assertEqual(funnel(tmp)["human_review"]["av_strict"]["correct"], 1)
+            bad = json.dumps({"id": "q1", "verdict": "great"}).encode()
+            with self.assertRaises(urllib.error.HTTPError):
+                opener.open(urllib.request.Request(base + "/api/review", data=bad, method="POST"))
+            server.shutdown()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)

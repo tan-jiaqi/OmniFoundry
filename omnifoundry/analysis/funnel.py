@@ -35,6 +35,16 @@ def funnel(run_dir):
                        **{k: passed[k] for k in CHECK_ORDER if k in passed},
                        "final": len(read_jsonl(run_dir / "think" / "out.jsonl"))}
 
+    reviews = read_jsonl(run_dir / "reviews.jsonl")
+    if reviews:
+        hr = defaultdict(Counter)
+        for r in reviews:
+            for tag in r.get("tags") or ["untagged"]:
+                hr[tag]["reviewed"] += bool(r.get("verdict"))
+                hr[tag][r.get("verdict") or "unjudged"] += 1
+                hr[tag]["blind_correct"] += r.get("human_answer") == r.get("gold")
+                hr[tag]["needs_both"] += r.get("needs") == "both"
+        out["human_review"] = {k: dict(v) for k, v in hr.items()}
     out["final_tags"] = dict(Counter(t for c in read_jsonl(run_dir / "think" / "out.jsonl") for t in c.get("tags", [])))
 
     by_task = defaultdict(Counter)
@@ -73,6 +83,11 @@ def render(f):
                 lines.append(f"  {k:14} {n:4}  {n / sv['attempts']:6.1%}")
     if f.get("final_tags"):
         lines.append("\nfinal data by tag: " + ", ".join(f"{k}={v}" for k, v in sorted(f["final_tags"].items())))
+    if f.get("human_review"):
+        lines.append("\nhuman review by tag")
+        for tag, c in sorted(f["human_review"].items()):
+            lines.append(f"  {tag:18} reviewed={c.get('reviewed', 0)} correct={c.get('correct', 0)} wrong={c.get('wrong', 0)} "
+                         f"ambiguous={c.get('ambiguous', 0)} blind_correct={c.get('blind_correct', 0)} needs_both={c.get('needs_both', 0)}")
     lines.append("\ncheck results")
     for ch, counts in f["checks"].items():
         lines.append(f"  {ch:12} " + ", ".join(f"{k}={n}" for k, n in sorted(counts.items(), key=lambda x: -x[1])))

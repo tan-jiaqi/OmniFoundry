@@ -4,6 +4,7 @@
     python -m omnifoundry funnel  runs/m1-001
     python -m omnifoundry compare runs/a runs/b
     python -m omnifoundry review  runs/m1-001          # static HTML page for manual spot checks
+    python -m omnifoundry review-serve runs/m1-001    # interactive review UI (blind answer, judgments)
 """
 import argparse
 from pathlib import Path
@@ -60,6 +61,11 @@ def cmd_review(args):
     print(build(Path(args.run), args.stage, args.n))
 
 
+def cmd_review_serve(args):
+    from .analysis.review_server import serve
+    serve(Path(args.run), args.stage, args.port)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="omnifoundry", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -81,6 +87,11 @@ def main(argv=None):
     v.add_argument("--stage", default="think")
     v.add_argument("--n", type=int, default=20)
     v.set_defaults(fn=cmd_review)
+    rs = sub.add_parser("review-serve", help="interactive review UI on 127.0.0.1")
+    rs.add_argument("run")
+    rs.add_argument("--stage", default="think", help="which stage's out.jsonl to review (think or verify)")
+    rs.add_argument("--port", type=int, default=8765)
+    rs.set_defaults(fn=cmd_review_serve)
     args = p.parse_args(argv)
     args.fn(args)
 
