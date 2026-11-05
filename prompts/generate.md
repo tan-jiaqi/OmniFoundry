@@ -29,6 +29,7 @@ Requirements:
    Name in single_modality_traps what each of them would pick, and why it is wrong.
 8. For ordering questions, the correct order must not be the order in which the events are listed in the question, and the listed order must not follow the order of the video.
 9. The options must not give the answer away by their form. All options are about the same length (the correct one must not be the longest), equally specific and detailed, and written in the same style. Every distractor must be plausible to someone who has not watched the video, yet clearly ruled out by what the video shows and says; exactly one option can be correct.
+10. When the question points to a moment through what is heard, describe that cue only by its sound: who speaks or sings, how it sounds, or what is said in words that are NOT shown anywhere on screen. Before finalizing, read the visual captions around that time. If a word, letter, name or number in your cue also appears on screen there (on-screen text, a displayed letter, a name caption, a title card), a muted viewer can find the moment by looking: rewrite the cue or choose another anchor. Example of a leak: "when the singer sings that a letter makes the sound 'nn'" while a large letter N is on screen.
 
 Return JSON only:
 {{"question": "...", "options": ["A. ...", "B. ..."], "answer": "A",

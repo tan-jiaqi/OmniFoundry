@@ -1,0 +1,9 @@
+# M1f: same 50 videos as M1e. Motivated by the human review of runs/m1e-001 (12/12 correct, but 5 questions
+# answerable by a muted viewer: the audio cue's words, letters or names were also shown on screen):
+#  - generate prompt rule 10: describe an audio cue only by what is heard; no words visible on screen
+#  - a visual-side shortcut in the generate-stage text gate is a soft failure: regenerate with feedback,
+#    fall back to the question (tagged visual_sufficient) only if no better one comes
+# Audio-side shortcuts stay tags only (all 3 audio_sufficient questions were judged to need both modalities).
+extends: m1e.yaml
+checks:
+  gate_text: {reject_if: both, retry_on: [visual]}

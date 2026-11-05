@@ -57,6 +57,8 @@ def respond(role, parts, options):
     if role == "gate_text":
         # Answerable only when both cited entries (the first audio and visual captions) are present.
         both = "code word for segment 0 " in text and "panel number 0 " in text
+        if options.get("visual_leak") and "panel number 0 " in text and "AUDIO" not in text:
+            both = True   # simulate a question a muted viewer can answer
         return json.dumps({"answer": _gold_letter(text) if both else _wrong_letter(text), "reason": "mock"})
     if role == "gate_av":
         full = "a video with its audio" in text

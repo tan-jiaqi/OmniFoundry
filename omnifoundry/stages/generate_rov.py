@@ -132,6 +132,8 @@ def process(ctx, bundle):
         if len(out) >= want:
             break
         task, feedback, role, attempt = tasks[task_id], [], "generator", 0
+        fallback = None   # (candidate, verdicts, index after the soft-failing check)
+        accepted = False
         while True:
             try:
                 cand = normalize(_generate_once(ctx, bundle, task, attempt, feedback, role), bundle, task_id, attempt, feedback, ctx)
@@ -146,8 +148,11 @@ def process(ctx, bundle):
                 verdicts += vs
                 if passed:
                     out.append({**cand, **modality_tags(vs)})
+                    accepted = True
                     break
                 rejected.append({**cand, "rejected_by": failure["check"], "reason": failure["reason"]})
+                if failure.get("detail", {}).get("soft"):
+                    fallback = (cand, vs, len(vs))
             decision = retry(ctx, cand, failure, attempt)
             if decision is None:
                 break
@@ -155,4 +160,14 @@ def process(ctx, bundle):
             task = tasks.get(decision.get("task_id", task["id"]), task)
             role = decision.get("role", role)
             attempt += 1
+        if not accepted and fallback:
+            # No better question came: accept the soft-failed one if it passes the remaining checks.
+            cand, vs, done = fallback
+            soft = {**vs[-1], "passed": True, "reason": "accepted_fallback"}
+            passed, rest, failure = run_chain(ctx, checks[done:], cand, bundle)
+            verdicts += [soft] + rest
+            if passed:
+                out.append({**cand, **modality_tags(vs[:-1] + [soft] + rest), "accepted_as_fallback": True})
+            else:
+                rejected.append({**cand, "rejected_by": failure["check"], "reason": failure["reason"]})
     return {"out": out, "rejected": rejected, "verdicts": verdicts}

@@ -130,6 +130,16 @@ class TestGateModes(unittest.TestCase):
         self.assertIsNone(self.evaluate(3, 3, "none")[0])
         self.assertEqual(self.evaluate(0, 0, "none", full=1)[0], "full_wrong")   # correctness always filters
 
+    def test_soft_retry_on_visual_shortcut(self):
+        from omnifoundry.checks.gate import _evaluate
+        res = {"full": ["A"] * 3, "audio_only": ["B"] * 3, "visual_only": ["A"] * 3}
+        failed, detail = _evaluate({"answer": "A"}, res, 1, "both", ("visual",))
+        self.assertEqual((failed, detail["soft"]), ("visual_only_shortcut", True))
+        self.assertIn("shown on screen", detail["hint"])
+        self.assertIsNone(_evaluate({"answer": "A"}, res, 1, "both", ())[0])
+        res = {"full": ["A"] * 3, "audio_only": ["A"] * 3, "visual_only": ["B"] * 3}
+        self.assertIsNone(_evaluate({"answer": "A"}, res, 1, "both", ("visual",))[0])   # audio side only tags
+
     def test_tags(self):
         from omnifoundry.checks.gate import modality_tags
         for (a, v), tags in {(0, 0): ["av_strict"], (2, 0): ["audio_sufficient"], (0, 3): ["visual_sufficient"]}.items():
@@ -279,6 +289,20 @@ class TestEndToEnd(unittest.TestCase):
         # every model call in this run is served from the LLM cache, at no cost.
         calls = read_jsonl(self.tmp / "variant2" / "calls.jsonl")
         self.assertTrue(calls and all(c["cached"] for c in calls))
+
+    def test_visual_shortcut_retries_then_falls_back(self):
+        out = self.run_cli("soft", "--set", "checks.gate_text={reject_if: both, retry_on: [visual]}",
+                           "--set", "models.gate_text.visual_leak=true", "--set", "verify.checks=[clue]",
+                           "--set", "generate.checks=[structure, grounding, solver, blind, gate_text]")
+        run = self.tmp / "soft"
+        acc = read_jsonl(run / "generate" / "out.jsonl")
+        self.assertEqual(len(acc), 2, out)
+        self.assertTrue(all(c["accepted_as_fallback"] and c["tags"] == ["visual_sufficient"] for c in acc))
+        reasons = {r["reason"] for r in read_jsonl(run / "generate" / "rejected.jsonl")}
+        self.assertIn("visual_only_shortcut", reasons)          # regenerated with feedback first
+        fb = [c for c in read_jsonl(run / "generate" / "rejected.jsonl") if c["reason"] == "visual_only_shortcut"]
+        self.assertTrue(any("shown on screen" in f for c in fb for f in c["feedback"]) or len(fb) >= 2)
+        self.assertEqual(len(read_jsonl(run / "export" / "sft.jsonl")), 2)
 
     def test_clue_failure_rejects(self):
         out = self.run_cli("strict", "--set", "checks.clue.min_strength=0.95")

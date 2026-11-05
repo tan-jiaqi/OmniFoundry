@@ -19,7 +19,9 @@ filters. For the single-modality conditions, `reject_if` decides what filters:
     both  reject only if BOTH single modalities alone answer, i.e. the question needs no cross-modal
           evidence at all (lenient, in the spirit of OmniQA's gate)
     none  never reject for shortcuts
-`without_clues` (when enabled) filters in modes any/both. Whatever the mode, every verdict records the
+`without_clues` (when enabled) filters in modes any/both. `retry_on: [visual]` additionally marks a
+visual-side shortcut as a *soft* failure: the generate stage asks for a better question with feedback and
+falls back to this one only if none comes. Whatever the mode, every verdict records the
 single-modality outcome and a dependency label, from which `modality_tags` derives the data-quality tags:
     av_strict          neither modality alone answers: the high-quality joint-reasoning subset
     audio_sufficient   the audio alone answers
@@ -38,7 +40,10 @@ VISUAL_SIDE = ("visual_only", "video_only")
 
 HINTS = {
     "audio_only": "answerable from the audio alone: the speech or sound already gives the answer away",
-    "visual_only": "answerable from the visuals alone: only one thing in the video fits, so the audio cue is not needed",
+    "visual_only": ("answerable from the visuals alone. Either only one thing in the video fits, or the audio cue as worded "
+                    "has a visible counterpart: a word, letter, name or number in the cue is also shown on screen around "
+                    "that moment, so a muted viewer can find the moment by looking. Describe the audio cue only by what is "
+                    "heard, or choose an anchor whose words never appear on screen"),
     "video_only": "answerable from the muted video alone: only one thing in the video fits, so the audio cue is not needed",
     "without_clues": "answerable without the cited evidence: the question does not depend on it",
     "full": "not answerable even with all the evidence: the question or its answer is not supported",
@@ -47,7 +52,7 @@ HINTS = {
 }
 
 
-def _evaluate(cand, results, max_correct, reject_if="any"):
+def _evaluate(cand, results, max_correct, reject_if="any", retry_on=()):
     """results: {condition: [letters]}. Returns (failure reason or None, detail).
 
     detail[cond] = {correct, trials}; detail['shortcuts'] = single-modality conditions answered above
@@ -75,6 +80,13 @@ def _evaluate(cand, results, max_correct, reject_if="any"):
             failed = "both_modalities_shortcut"
         elif "without_clues" in shortcuts:
             failed = "without_clues_shortcut"
+    # Soft failure: the question is acceptable but a better one is wanted. The generate stage regenerates
+    # with feedback and, if no better question comes, accepts this one (see generate_rov.process).
+    if failed is None:
+        side = [c for c, short in (("visual", visual_short), ("audio", audio_short)) if short and c in retry_on]
+        if side:
+            cond = next(c for c in shortcuts if c in (VISUAL_SIDE if side[0] == "visual" else AUDIO_SIDE))
+            failed, detail["soft"] = f"{cond}_shortcut", True
     if failed:
         detail["hint"] = HINTS.get(failed.rsplit("_", 1)[0], failed)
     return failed, detail
@@ -121,7 +133,7 @@ class GateText(Check):
         picks = parallel(draw(cond, i) for cond in conds for i in range(trials))
         results = {cond: picks[k * trials:(k + 1) * trials] for k, cond in enumerate(conds)}
         samples = [{"condition": cond, "answers": results[cond]} for cond in conds]
-        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)), o.get("reject_if", "any"))
+        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)), o.get("reject_if", "any"), tuple(o.get("retry_on", ())))
         return self.verdict(cand, failed is None, failed or "", samples=samples, detail=detail)
 
 
@@ -163,7 +175,7 @@ class GateMedia(Check):
         picks = parallel(draw(cond, i) for cond in conds for i in range(trials))
         results = {cond: picks[k * trials:(k + 1) * trials] for k, cond in enumerate(conds)}
         samples = [{"condition": cond, "answers": results[cond]} for cond in conds]
-        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)), o.get("reject_if", "any"))
+        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)), o.get("reject_if", "any"), tuple(o.get("retry_on", ())))
         detail["window"] = [round(s, 2), round(e, 2)]
         return self.verdict(cand, failed is None, failed or "", samples=samples, detail=detail)
 

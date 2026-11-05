@@ -96,6 +96,10 @@ Not implemented yet: the RBY (reasoning beyond video) route, the `refine` repair
 | m1c-001 | captions by gemini-3.1-pro; clue check inside generate (`m1c.yaml`) | 4 / 103 | Clue validity 33% to 89% |
 | m1d-001 | 50 videos; prompt rule 9 + option_balance (`m1d.yaml`) | 3 / 300 | "True details as distractors" made answers ambiguous (solver 100% to 80%) |
 | m1e-001 | correctness filters; shortcut tagging, reject only if both modalities suffice (`m1e.yaml`) | 12 / 208 | About 0.74M tokens per final question; 2 of 12 are `av_strict` |
+| m1f-001 | prompt rule 10 (audio cue must not name on-screen words); visual shortcut triggers a soft retry (`m1f.yaml`) | 12 / 272 | No change in the tag mix: audio and visuals are redundant in the source videos (alphabet songs, captioned explainers), so selection matters more than prompt wording |
+
+Human review of m1e-001 (12/12): every answer correct, but 5 questions were answerable with the sound off,
+because the audio cue named a letter, word or name also shown on screen.
 
 Data tags (in `sft.jsonl` / `rl.jsonl`): `av_strict` (neither audio alone nor visuals alone answers: the
 high-quality subset), `audio_sufficient`, `visual_sufficient`, with the per-condition counts in `modality_dependency`.
