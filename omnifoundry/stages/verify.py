@@ -6,6 +6,7 @@ Accepted candidates gain a `verify` summary; every verdict (with all model draws
 import sys
 
 from ..checks import chain, chain_prompts, chain_roles, run_chain
+from ..checks.gate import modality_tags
 from ..jsonio import read_jsonl
 from .. import lineage
 from .common import lineage_extra
@@ -44,6 +45,9 @@ def process(ctx, item):
     lin = lineage.make(NAME, VERSION, [cand["id"], bundle["id"]], **lineage_extra(ctx, sys.modules[__name__]))
     summary = {v["check"]: {"passed": v["passed"], "reason": v["reason"], "detail": v.get("detail", {})} for v in verdicts}
     rec = {**cand, "verify": summary, "verify_lineage": lin}
+    tags = modality_tags(verdicts)
+    if tags["modality_dependency"]:
+        rec.update(tags)
     if passed:
         return {"out": [rec], "verdicts": verdicts}
     return {"rejected": [{**rec, "rejected_by": failure["check"], "reason": failure["reason"]}], "verdicts": verdicts}

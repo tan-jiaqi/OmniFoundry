@@ -76,6 +76,21 @@ Same stages and approach. Deliberate differences, each switchable from config fo
 
 Not implemented yet: the RBY (reasoning beyond video) route, the `refine` repair step, and open-ended questions.
 
+## M1 experiment log (20 then 50 OmniVideo-100K videos, gemini-3.8-flash unless noted)
+
+| Run | Change (config) | Final / attempts | Lesson |
+| --- | --- | --- | --- |
+| m1-001 | OmniQA baseline (`m1.yaml`) | 0 / 43 | Most questions had a single-modality shortcut |
+| m1b-001 | anchor rules in prompt; text gate inside generate; full-video media gate (`m1b.yaml`) | 1 / 73 | Text-gate pass 0% to 29%; caption errors now dominate |
+| m1c-001 | captions by gemini-3.1-pro; clue check inside generate (`m1c.yaml`) | 4 / 103 | Clue validity 33% to 89% |
+| m1d-001 | 50 videos; prompt rule 9 + option_balance (`m1d.yaml`) | 3 / 300 | "True details as distractors" made answers ambiguous (solver 100% to 80%) |
+| m1e-001 | correctness filters; shortcut tagging, reject only if both modalities suffice (`m1e.yaml`) | 12 / 208 | About 0.74M tokens per final question; 2 of 12 are `av_strict` |
+
+Data tags (in `sft.jsonl` / `rl.jsonl`): `av_strict` (neither audio alone nor visuals alone answers: the
+high-quality subset), `audio_sufficient`, `visual_sufficient`, with the per-condition counts in `modality_dependency`.
+
 ## Known gateway behaviour
 
 Probed 2026-11-04 with one synthetic clip per format. `video_format: video_url` is accepted, but the media is dropped and the model guesses, with no error. `file` and `image_url` answered correctly, and `base.yaml` uses `file`. Re-run `scripts/probe_gateway.py` when changing models or gateways.
+
+At any concurrency a few requests hang without answering, and 503 outages lasting tens of minutes occur, so timeouts are short (180 s, 400 to 600 s for long-output or full-video roles) with 5 retries and exponential backoff. A run interrupted by an outage is recovered by re-running the same command: finished items are cache hits.

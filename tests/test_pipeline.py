@@ -105,9 +105,40 @@ class TestDeterministicChecks(unittest.TestCase):
         c["clues"][1] = {**c["clues"][1], "start_s": 60, "end_s": 65}
         self.assertEqual(CHECKS["grounding"]().run(Ctx(), c, far)["reason"], "simultaneity_gap")
 
+    def test_option_balance(self):
+        long_gold = candidate(options=["A. a much longer and very specific correct option text"] + [f"{chr(66 + i)}. short {i}" for i in range(7)])
+        self.assertEqual(self.run_check("option_balance", long_gold)["reason"], "answer_length_leak")
+        self.assertTrue(self.run_check("option_balance", candidate())["passed"])
+
     def test_quote_matching(self):
         self.assertTrue(quote_matches("Welcome to the WORKSHOP!", "the host says welcome to the workshop today", .6, 4))
         self.assertFalse(quote_matches("rain", "heavy storm", .6, 4))
+
+
+class TestGateModes(unittest.TestCase):
+    def evaluate(self, audio, visual, mode, full=3):
+        from omnifoundry.checks.gate import _evaluate
+        res = {"full": ["A"] * full + ["B"] * (3 - full), "audio_only": ["A"] * audio + ["B"] * (3 - audio),
+               "visual_only": ["A"] * visual + ["B"] * (3 - visual)}
+        return _evaluate({"answer": "A"}, res, 1, mode)
+
+    def test_modes(self):
+        self.assertEqual(self.evaluate(0, 0, "any"), (None, self.evaluate(0, 0, "any")[1]))
+        self.assertEqual(self.evaluate(2, 0, "any")[0], "audio_only_shortcut")
+        self.assertIsNone(self.evaluate(2, 0, "both")[0])
+        self.assertEqual(self.evaluate(2, 3, "both")[0], "both_modalities_shortcut")
+        self.assertIsNone(self.evaluate(3, 3, "none")[0])
+        self.assertEqual(self.evaluate(0, 0, "none", full=1)[0], "full_wrong")   # correctness always filters
+
+    def test_tags(self):
+        from omnifoundry.checks.gate import modality_tags
+        for (a, v), tags in {(0, 0): ["av_strict"], (2, 0): ["audio_sufficient"], (0, 3): ["visual_sufficient"]}.items():
+            _, detail = self.evaluate(a, v, "none")
+            self.assertEqual(modality_tags([{"check": "gate_text", "detail": detail}])["tags"], tags)
+        _, text = self.evaluate(0, 0, "none")
+        _, media = self.evaluate(3, 0, "none")
+        out = modality_tags([{"check": "gate_text", "detail": text}, {"check": "gate_media", "detail": media}])
+        self.assertEqual((out["tags"], out["modality_dependency"]["evidence"]), (["audio_sufficient"], "gate_media"))
 
 
 class TestHelpers(unittest.TestCase):
@@ -195,6 +226,8 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(reply[-1], reply.split("points to option ")[1][0])
         self.assertTrue(rl[0]["audio_clues"] and rl[0]["visual_clues"])
         self.assertIn("gate_media", rl[0]["signals"])
+        self.assertEqual(rl[0]["tags"], ["av_strict"])
+        self.assertEqual(sft[0]["modality_dependency"]["evidence"], "gate_media")
 
         # The first generation attempt fails grounding and is regenerated with feedback.
         rejected = read_jsonl(run / "generate" / "rejected.jsonl")
@@ -215,6 +248,14 @@ class TestEndToEnd(unittest.TestCase):
             self.assertIn(f"[{st}] items={n} cache_hits={n}", second)
         self.assertFalse((self.tmp / "run2" / "calls.jsonl").exists())
         self.assertEqual(read_jsonl(self.tmp / "run2" / "export" / "sft.jsonl"), sft)
+
+    def test_code_change_keeps_stage_cache(self):
+        self.run_cli("code_a")
+        from omnifoundry import lineage
+        with unittest.mock.patch.object(lineage, "code_version", lambda: "different-code"):
+            out = self.run_cli("code_b")
+        for st in ("caption", "generate", "verify", "think"):
+            self.assertIn(f"[{st}] items=2 cache_hits=2", out)
 
     def test_prompt_change_recomputes_only_downstream(self):
         self.run_cli("base")

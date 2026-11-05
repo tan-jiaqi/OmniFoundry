@@ -10,9 +10,23 @@ Register with @register. Chains are lists of names in the config (`generate.chec
 each check reads its options from `checks.<name>` in the config. Every model draw a check makes goes into
 `Verdict.samples`, so pass rates / difficulty can be recomputed later without new calls.
 """
+from concurrent.futures import ThreadPoolExecutor
+
 from ..schema import Verdict
 
 CHECKS = {}
+
+
+def parallel(jobs, max_workers=16):
+    """Run zero-argument callables concurrently; results come back in job order.
+
+    Each job is one independent model request, so results and cache keys are the same as running them
+    one after another. The per-model limiter in llm.py still caps how many are in flight at once."""
+    jobs = list(jobs)
+    if len(jobs) <= 1:
+        return [j() for j in jobs]
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(jobs))) as pool:
+        return list(pool.map(lambda j: j(), jobs))
 
 
 def register(cls):
@@ -69,4 +83,4 @@ def run_chain(ctx, checks, cand, bundle, *, short_circuit=True):
 
 
 # Import modules so their @register decorators run.
-from . import structure, grounding, model_checks, clue, gate  # noqa: E402,F401
+from . import structure, balance, grounding, model_checks, clue, gate  # noqa: E402,F401

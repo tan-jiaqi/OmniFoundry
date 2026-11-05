@@ -1,0 +1,10 @@
+# M1d: 50 videos (the 20 from M1-M1c are a deterministic prefix of the sample, so their captions are cache
+# hits; 30 are new). Changes, each motivated by runs/m1c-001:
+#  - generate prompt rule 9 + deterministic option_balance check: the gold was the longest option 2x chance
+# Same models as M1c (captions gemini-3.1-pro-preview, everything else gemini-3.8-flash).
+extends: m1c.yaml
+select: {n: 50}
+generate:
+  checks: [structure, option_balance, grounding, solver, blind, gate_text, clue]
+checks:
+  option_balance: {max_ratio: 1.25}

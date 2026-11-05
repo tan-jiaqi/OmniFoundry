@@ -15,6 +15,12 @@ def compare(run_a, run_b):
     for st in sorted(set(fa["stages"]) | set(fb["stages"])):
         a, b = fa["stages"].get(st, {}), fb["stages"].get(st, {})
         lines.append(f"{st:10} {a.get('out', '-'):>6} {b.get('out', '-'):>6}")
+    sa, sb = fa.get("survival", {}), fb.get("survival", {})
+    lines += ["", f"survival over attempts (A={sa.get('attempts', 0)}, B={sb.get('attempts', 0)})   A          B"]
+    for k in [k for k in ("structure", "option_balance", "grounding", "solver", "blind", "gate_text", "clue", "gate_media", "final")
+              if k in sa or k in sb]:
+        cell = lambda s_: f"{s_[k]:4} {s_[k] / s_['attempts']:6.1%}" if k in s_ and s_.get("attempts") else "     -    "  # noqa: E731
+        lines.append(f"  {k:14} {cell(sa)}   {cell(sb)}")
     lines += ["", "check         A.pass_rate (n)   B.pass_rate (n)   top failure reasons A | B"]
     for ch in sorted(set(fa["checks"]) | set(fb["checks"])):
         ca, cb = Counter(fa["checks"].get(ch, {})), Counter(fb["checks"].get(ch, {}))

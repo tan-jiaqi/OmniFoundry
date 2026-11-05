@@ -90,5 +90,9 @@ class Clue(Check):
                     break
         detail = {"skipped": skipped}
         if failed:
-            return self.verdict(cand, False, "clue_unsupported", samples=samples, detail={**detail, "clue": failed})
+            bad = next(x for x in samples if x["clue"] == failed)
+            clue = next(c for c in cand["clues"] if c["id"] == failed)
+            hint = (f"clue {failed} (caption {clue['caption_ref']}, {clue['timestamp']}) does not match the video: "
+                    f"{bad['observed'][:250]}. That caption entry is unreliable; build the question on other evidence")
+            return self.verdict(cand, False, "clue_unsupported", samples=samples, detail={**detail, "clue": failed, "hint": hint})
         return self.verdict(cand, True, samples=samples, detail=detail)

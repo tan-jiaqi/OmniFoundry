@@ -26,7 +26,8 @@ def sft_row(rec, opts):
     return {"id": rec["id"], "video": rec["video_path"],
             "messages": [{"role": "user", "content": [{"type": "video"}, {"type": "text", "text": user}]},
                          {"role": "assistant", "content": f"<think>\n{rec['thinking']}\n</think>\n\n{rec['answer']}"}],
-            "task_type": rec["task_type"], "route": rec["route"]}
+            "task_type": rec["task_type"], "route": rec["route"], "tags": rec.get("tags", []),
+            "modality_dependency": rec.get("modality_dependency")}
 
 
 def rl_row(rec):
@@ -34,7 +35,7 @@ def rl_row(rec):
             "options": rec["options"], "answer": rec["answer"], "task_type": rec["task_type"], "route": rec["route"],
             "audio_clues": [_clue_text(c) for c in rec["clues"] if c["modality"] in AUDIO_MODALITIES],
             "visual_clues": [_clue_text(c) for c in rec["clues"] if c["modality"] == "visual"],
-            "signals": _signals(rec)}
+            "signals": _signals(rec), "tags": rec.get("tags", []), "modality_dependency": rec.get("modality_dependency")}
 
 
 def run(ctx, log=print):

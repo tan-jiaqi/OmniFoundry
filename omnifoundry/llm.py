@@ -212,7 +212,8 @@ class Client:
                 self._log(key, None, tag, context, f"{exc} (attempt {attempt + 1})")
                 if not exc.retryable or attempt == retries:
                     break
-                time.sleep(min(60, 2 ** attempt * 2))
+                # Gateway hiccups (503/429, hung connections) last tens of seconds: back off 5, 10, 20, 40, 80 s.
+                time.sleep(min(120, 5 * 2 ** attempt))
         raise last
 
     def _log(self, key, res, tag, context, error):

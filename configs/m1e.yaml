@@ -1,0 +1,14 @@
+# M1e: correctness first, modality dependency as a tag (user decision 2026-11-05).
+#  Filters (correctness): structure, option balance, grounding, solver, blind (question-only leak),
+#    clue validity on real clips for visual AND audio clues, full/av conditions answered correctly.
+#  Modality shortcuts: rejected only when BOTH single modalities answer alone (lenient, OmniQA-like);
+#    every question is tagged av_strict / audio_sufficient / visual_sufficient from the gates.
+#  Also: M1d prompt rule 9 "true detail as distractor" reverted (solver pass fell 100% -> 80%);
+#    gate_av timeout raised (79 timeouts on full videos in M1d).
+extends: m1d.yaml
+checks:
+  gate_text: {reject_if: both}
+  gate_media: {reject_if: both}
+  clue: {modalities: [visual, speech, sound, music]}
+models:
+  gate_av: {timeout_s: 400}

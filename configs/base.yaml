@@ -1,6 +1,6 @@
 # Base configuration. Experiments extend this and override only what they change.
 env_file: .env
-run: {workers: 4}
+run: {workers: 16}
 cache: {dir: cache, enabled: true}
 prompts: {dir: prompts, overrides: {}}
 catalog: {path: catalog/tasks.yaml}
@@ -67,23 +67,25 @@ models:
     backend: openai
     base_url: https://api15.xhub.chat/v1
     api_key_env: WANDOU_API_KEY
-    timeout_s: 600
-    max_retries: 3
-    concurrency: 8
+    # Gateway probe 2026-11-04: at any concurrency a few requests hang without answering, so keep timeouts
+    # short and retry; only long-output roles get more time.
+    timeout_s: 180
+    max_retries: 5
+    concurrency: 24
     max_tokens: 16384
     temperature: 0
     # Gateway probe 2026-11-04 (scripts/probe_gateway.py): `video_url` is accepted but the media is dropped and
     # the model guesses (wrong colors, no error). `file` and `image_url` answered correctly. Do not use video_url.
     video_format: file
     audio_format: input_audio
-  planner: {model: gemini-3.1-pro-preview}
-  captioner: {model: gemini-3.1-pro-preview}
+  planner: {model: gemini-3.1-pro-preview, timeout_s: 600}
+  captioner: {model: gemini-3.1-pro-preview, timeout_s: 600}
   # Generator comparison 2026-11-04 on 2 news videos (runs/gen-{a,b,c}): deepseek-v4-flash with thinking wrote
   # the best-grounded questions but needs >16K tokens (some calls 25K) and ~3 min each; with thinking disabled it
   # is 20x faster but wrote single-modality / answer-leaking questions; gpt-5.6-sol was good but slow too.
   # Task selection gains nothing from 20K thinking tokens, so it runs without thinking.
   selector: {model: deepseek-v4-flash, extra_body: {thinking: {type: disabled}}}
-  generator: {model: deepseek-v4-flash, temperature: 0.7, max_tokens: 32768}
+  generator: {model: deepseek-v4-flash, temperature: 0.7, max_tokens: 32768, timeout_s: 600}
   solver: {model: deepseek-v4-flash}
   blind: {model: deepseek-v4-flash}
   clue_visual: {model: gemini-3.5-flash}

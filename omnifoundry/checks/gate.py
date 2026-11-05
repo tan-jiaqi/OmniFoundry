@@ -12,28 +12,86 @@ condition does.
     video_only    the same window, muted          -> must NOT be correct
     audio_only    the same window, audio only     -> must NOT be correct
 Conditions are configurable lists, so each one can be switched on or off for A/B runs.
+
+Filtering vs tagging. `full` / `av` must be answered correctly: that is a correctness requirement and always
+filters. For the single-modality conditions, `reject_if` decides what filters:
+    any   reject if either single modality alone answers (strict)
+    both  reject only if BOTH single modalities alone answer, i.e. the question needs no cross-modal
+          evidence at all (lenient, in the spirit of OmniQA's gate)
+    none  never reject for shortcuts
+`without_clues` (when enabled) filters in modes any/both. Whatever the mode, every verdict records the
+single-modality outcome and a dependency label, from which `modality_tags` derives the data-quality tags:
+    av_strict          neither modality alone answers: the high-quality joint-reasoning subset
+    audio_sufficient   the audio alone answers
+    visual_sufficient  the visuals alone answer
 """
 from ..schema import fmt_range
 from ..stages.common import captions_text, mcq_text
 from .clue import clip_window, cut_clip
 from .model_checks import answer_letter
-from . import Check, register
+from . import Check, parallel, register
 
 MUST_PASS = {"full", "av"}
+AUDIO_SIDE = ("audio_only",)
+VISUAL_SIDE = ("visual_only", "video_only")
 
 
-def _evaluate(cand, results, max_correct):
-    """results: {condition: [letters]}. Returns verdict pieces."""
-    detail, failed = {}, None
+HINTS = {
+    "audio_only": "answerable from the audio alone: the speech or sound already gives the answer away",
+    "visual_only": "answerable from the visuals alone: only one thing in the video fits, so the audio cue is not needed",
+    "video_only": "answerable from the muted video alone: only one thing in the video fits, so the audio cue is not needed",
+    "without_clues": "answerable without the cited evidence: the question does not depend on it",
+    "full": "not answerable even with all the evidence: the question or its answer is not supported",
+    "av": "not answerable even from the video with sound: the question or its answer is not supported",
+    "both_modalities": "answerable from the audio alone AND from the visuals alone: the question needs no cross-modal evidence",
+}
+
+
+def _evaluate(cand, results, max_correct, reject_if="any"):
+    """results: {condition: [letters]}. Returns (failure reason or None, detail).
+
+    detail[cond] = {correct, trials}; detail['shortcuts'] = single-modality conditions answered above
+    max_correct; detail['dependency'] = 'joint' | 'audio_sufficient' | 'visual_sufficient' | 'either_sufficient'.
+    """
+    detail, shortcuts, wrong = {}, [], None
     for cond, picks in results.items():
         correct = sum(p == cand["answer"] for p in picks)
         detail[cond] = {"correct": correct, "trials": len(picks)}
         if cond in MUST_PASS:
-            if correct * 2 <= len(picks) and failed is None:
-                failed = f"{cond}_wrong"
-        elif correct > max_correct and failed is None:
-            failed = f"{cond}_shortcut"
+            if correct * 2 <= len(picks) and wrong is None:
+                wrong = f"{cond}_wrong"
+        elif correct > max_correct:
+            shortcuts.append(cond)
+    audio_short = any(c in shortcuts for c in AUDIO_SIDE)
+    visual_short = any(c in shortcuts for c in VISUAL_SIDE)
+    detail["shortcuts"] = shortcuts
+    detail["dependency"] = {(False, False): "joint", (True, False): "audio_sufficient",
+                            (False, True): "visual_sufficient", (True, True): "either_sufficient"}[(audio_short, visual_short)]
+    failed = wrong
+    if failed is None and reject_if == "any" and shortcuts:
+        failed = f"{shortcuts[0]}_shortcut"
+    elif failed is None and reject_if == "both":
+        if audio_short and visual_short:
+            failed = "both_modalities_shortcut"
+        elif "without_clues" in shortcuts:
+            failed = "without_clues_shortcut"
+    if failed:
+        detail["hint"] = HINTS.get(failed.rsplit("_", 1)[0], failed)
     return failed, detail
+
+
+def modality_tags(verdicts):
+    """Data-quality tags from the most direct gate evidence available (real media over captions)."""
+    by_check = {v["check"]: v for v in verdicts if v["check"] in ("gate_media", "gate_text")}
+    v = by_check.get("gate_media") or by_check.get("gate_text")
+    if v is None or "dependency" not in v.get("detail", {}):
+        return {"tags": [], "modality_dependency": None}
+    d = v["detail"]
+    dep = d["dependency"]
+    tags = {"joint": ["av_strict"], "audio_sufficient": ["audio_sufficient"], "visual_sufficient": ["visual_sufficient"],
+            "either_sufficient": ["audio_sufficient", "visual_sufficient"]}[dep]
+    single = {c: d[c] for c in (*AUDIO_SIDE, *VISUAL_SIDE) if c in d}
+    return {"tags": tags, "modality_dependency": {"label": dep, "evidence": v["check"], **single}}
 
 
 @register
@@ -53,17 +111,17 @@ class GateText(Check):
             "visual_only": captions_text(bundle, audio=False, with_refs=False),
             "without_clues": captions_text(bundle, exclude_refs=cited, with_refs=False),
         }
-        results, samples = {}, []
-        for cond in conds:
+        client = ctx.models("gate_text")
+
+        def draw(cond, i):
             text = ctx.prompts["gate_text"].render(captions=views[cond], mcq=mcq_text(cand))
-            picks = []
-            for i in range(trials):
-                res = ctx.models("gate_text").call([{"type": "text", "text": text}], sample=i, temperature=temp,
-                                                   tag=f"gate_text:{cond}", context={"candidate": cand["id"]})
-                picks.append(answer_letter(res))
-            results[cond] = picks
-            samples.append({"condition": cond, "answers": picks})
-        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)))
+            return lambda: answer_letter(client.call([{"type": "text", "text": text}], sample=i, temperature=temp,
+                                                     tag=f"gate_text:{cond}", context={"candidate": cand["id"]}))
+
+        picks = parallel(draw(cond, i) for cond in conds for i in range(trials))
+        results = {cond: picks[k * trials:(k + 1) * trials] for k, cond in enumerate(conds)}
+        samples = [{"condition": cond, "answers": results[cond]} for cond in conds]
+        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)), o.get("reject_if", "any"))
         return self.verdict(cand, failed is None, failed or "", samples=samples, detail=detail)
 
 
@@ -87,22 +145,25 @@ class GateMedia(Check):
                                float(o.get("max_len_s", 600)))
         src = bundle["extra"]["video_path"]
         modes = {"av": ("av", "video"), "video_only": ("video", "video"), "audio_only": ("audio", "audio")}
-        results, samples = {}, []
-        for cond in conds:
+        client = ctx.models("gate_av")
+        descs = {"av": "a video with its audio", "video_only": "a video without audio",
+                 "audio_only": "only the audio track of a video"}
+        inputs = {}
+        for cond in conds:                                  # cut clips first (ffmpeg, cached on disk)
             mode, kind = modes[cond]
-            clip = cut_clip(ctx, src, s, e, mode)
-            text = ctx.prompts["gate_media"].render(mcq=mcq_text(cand), clip_range=fmt_range(s, e),
-                                                    input_desc={"av": "a video with its audio", "video_only": "a video without audio",
-                                                                "audio_only": "only the audio track of a video"}[cond])
-            picks = []
-            for i in range(trials):
-                res = ctx.models("gate_av").call([{"type": "text", "text": text}, {"type": kind, "path": str(clip)}],
-                                                 sample=i, temperature=temp, tag=f"gate_media:{cond}",
-                                                 context={"candidate": cand["id"]})
-                picks.append(answer_letter(res))
-            results[cond] = picks
-            samples.append({"condition": cond, "answers": picks})
-        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)))
+            inputs[cond] = (kind, cut_clip(ctx, src, s, e, mode),
+                            ctx.prompts["gate_media"].render(mcq=mcq_text(cand), clip_range=fmt_range(s, e), input_desc=descs[cond]))
+
+        def draw(cond, i):
+            kind, clip, text = inputs[cond]
+            return lambda: answer_letter(client.call([{"type": "text", "text": text}, {"type": kind, "path": str(clip)}],
+                                                     sample=i, temperature=temp, tag=f"gate_media:{cond}",
+                                                     context={"candidate": cand["id"]}))
+
+        picks = parallel(draw(cond, i) for cond in conds for i in range(trials))
+        results = {cond: picks[k * trials:(k + 1) * trials] for k, cond in enumerate(conds)}
+        samples = [{"condition": cond, "answers": results[cond]} for cond in conds]
+        failed, detail = _evaluate(cand, results, int(o.get("max_correct", 1)), o.get("reject_if", "any"))
         detail["window"] = [round(s, 2), round(e, 2)]
         return self.verdict(cand, failed is None, failed or "", samples=samples, detail=detail)
 

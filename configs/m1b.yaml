@@ -1,0 +1,12 @@
+# M1b: same 20 videos and models as M1 (captions are cache hits). Changes, each motivated by runs/m1-001:
+#  - generate prompt: anchors need >= 2 similar candidates; ordering options must not follow listed order
+#  - gate_text moves into the generate chain, so shortcut failures are regenerated with feedback
+#  - verify runs clue (visual) + gate_media over the full video (a clue-window crop gave away localization)
+#  - one more generation attempt
+extends: m1.yaml
+generate:
+  max_attempts: 4
+  checks: [structure, grounding, solver, blind, gate_text]
+verify: {checks: [clue, gate_media]}
+checks:
+  gate_media: {window: full}

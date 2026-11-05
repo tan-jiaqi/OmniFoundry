@@ -10,6 +10,7 @@ import re
 import sys
 
 from ..checks import chain, chain_prompts, chain_roles, run_chain
+from ..checks.gate import modality_tags
 from ..jsonio import digest, read_jsonl
 from ..policies.retry import RETRY
 from ..policies.selector import PROMPTS as SELECTOR_PROMPTS, SELECTORS
@@ -144,7 +145,7 @@ def process(ctx, bundle):
                 passed, vs, failure = run_chain(ctx, checks, cand, bundle)
                 verdicts += vs
                 if passed:
-                    out.append(cand)
+                    out.append({**cand, **modality_tags(vs)})
                     break
                 rejected.append({**cand, "rejected_by": failure["check"], "reason": failure["reason"]})
             decision = retry(ctx, cand, failure, attempt)

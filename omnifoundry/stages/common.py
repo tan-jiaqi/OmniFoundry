@@ -30,8 +30,18 @@ def config_keys(ctx, stage):
     return tuple(stage.CONFIG_KEYS) + tuple(extra)
 
 
+def _content(obj):
+    """The item without provenance: drop `lineage` / `*_lineage` keys at any depth. Lineage carries the
+    code version, which must not reach cache keys (refactors would otherwise re-run every stage)."""
+    if isinstance(obj, dict):
+        return {k: _content(v) for k, v in obj.items() if k != "lineage" and not k.endswith("_lineage")}
+    if isinstance(obj, list):
+        return [_content(v) for v in obj]
+    return obj
+
+
 def item_key(ctx, stage, item):
-    return digest("stage", stage.NAME, stage.VERSION, item,
+    return digest("stage", stage.NAME, stage.VERSION, _content(item),
                   section_hash(ctx.config, *config_keys(ctx, stage)),
                   ctx.prompts.hashes(*stage.prompts(ctx)),
                   ctx.models.model_ids(*stage.roles(ctx)),

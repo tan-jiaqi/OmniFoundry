@@ -2,7 +2,7 @@
 import re
 
 from ..stages.common import captions_text, mcq_text
-from . import Check, register
+from . import Check, parallel, register
 
 
 def answer_letter(res):
@@ -53,11 +53,16 @@ class Blind(Check):
         o = self.options(ctx)
         trials, temp = int(o.get("trials", 2)), float(o.get("temperature", 0.3))
         text = ctx.prompts["blind"].render(mcq=mcq_text(cand))
-        samples = []
-        for i in range(trials):
-            res = ctx.models("blind").call([{"type": "text", "text": text}], sample=i, temperature=temp, tag="blind",
-                                           context={"candidate": cand["id"]})
-            samples.append({"answer": answer_letter(res), "reason": str((res.get("json") or {}).get("reason", ""))[:300]})
+        client = ctx.models("blind")
+
+        def draw(i):
+            def go():
+                res = client.call([{"type": "text", "text": text}], sample=i, temperature=temp, tag="blind",
+                                  context={"candidate": cand["id"]})
+                return {"answer": answer_letter(res), "reason": str((res.get("json") or {}).get("reason", ""))[:300]}
+            return go
+
+        samples = parallel(draw(i) for i in range(trials))
         correct = sum(s["answer"] == cand["answer"] for s in samples)
         if correct > int(o.get("max_correct", 0)):
             hint = next(s["reason"] for s in samples if s["answer"] == cand["answer"])

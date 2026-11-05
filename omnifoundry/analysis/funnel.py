@@ -8,6 +8,8 @@ from collections import Counter, defaultdict
 from ..jsonio import read_jsonl
 
 STAGES = ("select", "caption", "generate", "verify", "think")
+# Pipeline order of all checks; survival counts candidates that passed each, over generation attempts.
+CHECK_ORDER = ("parse", "structure", "option_balance", "grounding", "solver", "blind", "gate_text", "clue", "gate_media")
 
 
 def funnel(run_dir):
@@ -23,6 +25,17 @@ def funnel(run_dir):
         for v in read_jsonl(run_dir / st / "verdicts.jsonl"):
             checks[v["check"]]["passed" if v["passed"] else v["reason"]] += 1
     out["checks"] = {k: dict(v) for k, v in checks.items()}
+
+    # Survival: of all generation attempts, how many passed each check (checks absent from a run are
+    # skipped). A candidate's last check is final only if it passed everything and reached think.
+    attempts = len(read_jsonl(run_dir / "generate" / "out.jsonl")) + sum(
+        1 for c in read_jsonl(run_dir / "generate" / "rejected.jsonl") if "options" in c) + checks["parse"].total()
+    passed = {k: v.get("passed", 0) for k, v in checks.items()}
+    out["survival"] = {"attempts": attempts,
+                       **{k: passed[k] for k in CHECK_ORDER if k in passed},
+                       "final": len(read_jsonl(run_dir / "think" / "out.jsonl"))}
+
+    out["final_tags"] = dict(Counter(t for c in read_jsonl(run_dir / "think" / "out.jsonl") for t in c.get("tags", [])))
 
     by_task = defaultdict(Counter)
     for c in read_jsonl(run_dir / "generate" / "rejected.jsonl"):
@@ -52,6 +65,14 @@ def render(f):
     lines = ["stage      out  rejected  errors"]
     for st, v in f["stages"].items():
         lines.append(f"{st:9} {v['out']:4} {v['rejected']:9} {v['errors']:7}")
+    sv = f.get("survival", {})
+    if sv.get("attempts"):
+        lines.append("\nsurvival (share of generation attempts passing each check, in pipeline order)")
+        for k, n in sv.items():
+            if k != "attempts":
+                lines.append(f"  {k:14} {n:4}  {n / sv['attempts']:6.1%}")
+    if f.get("final_tags"):
+        lines.append("\nfinal data by tag: " + ", ".join(f"{k}={v}" for k, v in sorted(f["final_tags"].items())))
     lines.append("\ncheck results")
     for ch, counts in f["checks"].items():
         lines.append(f"  {ch:12} " + ", ".join(f"{k}={n}" for k, n in sorted(counts.items(), key=lambda x: -x[1])))

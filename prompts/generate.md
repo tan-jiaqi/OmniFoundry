@@ -23,6 +23,12 @@ Requirements:
    - Do not merge details from different referents into one.
    - If the question says "when" or "while", its audio and visual clues must really be simultaneous.
 6. List the presuppositions the question relies on (things it takes as given); each must be supported by a caption.
+7. Make each modality indispensable. Before writing, test the question against two people:
+   - A viewer with sound muted, who sees the whole video. If only one thing in the video could fit the question (one toothbrush, one person walking away, one card on top), they can answer without the audio. An anchor question therefore needs at least two visually similar candidates in the video (several players, several cards, several letters), and only the audio cue says which one is meant. Draw the distractors from the attributes of those other candidates.
+   - A listener with no picture. If the speech or sound already states the answer (a spoken name, color, number or description), they can answer without the visuals. The answer must be a visual fact that the audio never states.
+   Name in single_modality_traps what each of them would pick, and why it is wrong.
+8. For ordering questions, the correct order must not be the order in which the events are listed in the question, and the listed order must not follow the order of the video.
+9. The options must not give the answer away by their form. All options are about the same length (the correct one must not be the longest), equally specific and detailed, and written in the same style. Every distractor must be plausible to someone who has not watched the video, yet clearly ruled out by what the video shows and says; exactly one option can be correct.
 
 Return JSON only:
 {{"question": "...", "options": ["A. ...", "B. ..."], "answer": "A",

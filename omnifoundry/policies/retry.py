@@ -13,6 +13,12 @@ FIXABLE = {
     "dag_invalid", "missing_modality", "quote_not_in_captions", "timestamp_not_in_captions",
     "simultaneity_gap", "music_anchor", "options_invalid", "answer_invalid",
     "solver_disagrees", "solver_unsupported", "blind_correct", "presupposition_unsupported",
+    # Modality-gate failures, when a gate runs inside the generate chain.
+    "audio_only_shortcut", "visual_only_shortcut", "without_clues_shortcut",
+    # Clue validity, when the clue check runs inside the generate chain: a caption error, avoidable by
+    # building the question on other caption entries.
+    "clue_unsupported",
+    "answer_length_leak", "both_modalities_shortcut", "full_wrong",
 }
 
 

@@ -1,0 +1,21 @@
+# M1: reproduce the OmniQA baseline on 20 OmniVideo-100K videos.
+# Per the plan, Gate 1 checks visual clues only and Gate 2 runs on caption text only; audio-clue checks and
+# real-media gates are M2/M3 switches. Every role uses gemini-3.8-flash.
+extends: base.yaml
+select: {n: 20, min_duration_s: 30, max_duration_s: 600}
+verify: {checks: [clue, gate_text]}
+checks:
+  clue: {modalities: [visual]}
+models:
+  defaults: {model: gemini-3.8-flash, extra_body: null}
+  planner: {model: gemini-3.8-flash, timeout_s: 600}
+  captioner: {model: gemini-3.8-flash, timeout_s: 600}
+  selector: {model: gemini-3.8-flash, extra_body: null}
+  generator: {model: gemini-3.8-flash, temperature: 0.7, max_tokens: 32768, timeout_s: 600}
+  solver: {model: gemini-3.8-flash}
+  blind: {model: gemini-3.8-flash}
+  clue_visual: {model: gemini-3.8-flash}
+  clue_audio: {model: gemini-3.8-flash}
+  gate_text: {model: gemini-3.8-flash}
+  gate_av: {model: gemini-3.8-flash}
+  thinker: {model: gemini-3.8-flash}

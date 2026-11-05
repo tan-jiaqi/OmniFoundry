@@ -1,0 +1,11 @@
+# M1c: same 20 videos. Changes, each motivated by runs/m1b-001:
+#  - captions from gemini-3.1-pro-preview (6 of 9 verify rejections were caption errors); other roles stay 3.8-flash
+#  - the clue check moves into the generate chain, so a caption error triggers regeneration on other evidence
+#    instead of discarding the question; verify keeps only the full-video media gate
+extends: m1b.yaml
+generate:
+  checks: [structure, grounding, solver, blind, gate_text, clue]
+verify: {checks: [gate_media]}
+models:
+  planner: {model: gemini-3.1-pro-preview}
+  captioner: {model: gemini-3.1-pro-preview}
