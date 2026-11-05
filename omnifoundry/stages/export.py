@@ -5,6 +5,8 @@ rl.jsonl   question, options, answer, audio_clues, visual_clues (text, for clue-
            such as MFSD), plus task type and difficulty signals collected by the gates.
 Export is cheap and deterministic, so it is not cached.
 """
+from collections import Counter
+
 from ..jsonio import read_jsonl, write_json, write_jsonl
 from ..schema import AUDIO_MODALITIES
 
@@ -27,6 +29,7 @@ def sft_row(rec, opts):
             "messages": [{"role": "user", "content": [{"type": "video"}, {"type": "text", "text": user}]},
                          {"role": "assistant", "content": f"<think>\n{rec['thinking']}\n</think>\n\n{rec['answer']}"}],
             "task_type": rec["task_type"], "route": rec["route"], "tags": rec.get("tags", []),
+            "quality": rec.get("quality"), "soft_failures": rec.get("soft_failures", []),
             "modality_dependency": rec.get("modality_dependency")}
 
 
@@ -35,7 +38,8 @@ def rl_row(rec):
             "options": rec["options"], "answer": rec["answer"], "task_type": rec["task_type"], "route": rec["route"],
             "audio_clues": [_clue_text(c) for c in rec["clues"] if c["modality"] in AUDIO_MODALITIES],
             "visual_clues": [_clue_text(c) for c in rec["clues"] if c["modality"] == "visual"],
-            "signals": _signals(rec), "tags": rec.get("tags", []), "modality_dependency": rec.get("modality_dependency")}
+            "signals": _signals(rec), "tags": rec.get("tags", []), "quality": rec.get("quality"),
+            "soft_failures": rec.get("soft_failures", []), "modality_dependency": rec.get("modality_dependency")}
 
 
 def run(ctx, log=print):
@@ -53,5 +57,7 @@ def run(ctx, log=print):
     from ..analysis.funnel import funnel
     f = funnel(ctx.run_dir)
     write_json(ctx.run_dir / "funnel.json", f)
-    log(f"[export] sft={len(sft)} rl={len(rl)} -> {out_dir}")
+    tiers = Counter(r.get("quality") for r in thought)
+    log(f"[export] sft={len(sft)} rl={len(rl)} by quality: " + ", ".join(f"{k}={v}" for k, v in sorted(tiers.items(), key=str))
+        + f" -> {out_dir}")
     return {"sft": len(sft), "rl": len(rl)}

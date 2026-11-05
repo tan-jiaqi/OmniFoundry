@@ -21,7 +21,7 @@ _AT = re.compile(r"\bAt (\d{1,2}:\d{2})")
 
 
 def prompts(ctx):
-    return ["think"]
+    return ["think", "think_corroborate"]
 
 
 def roles(ctx):
@@ -75,9 +75,16 @@ def qc(text, cand, opts):
 def process(ctx, item):
     cand, bundle = item["candidate"], item["bundle"]
     opts = ctx.get("think", {}) or {}
-    text = ctx.prompts["think"].render(captions=captions_text(bundle, with_refs=False)[: int(opts.get("caption_chars", 14000))],
-                                       mcq=mcq_text(cand), answer=cand["answer"], evidence=evidence_text(cand),
-                                       opening=opts.get("opening", "Got it!"))
+    # A question one modality already answers gets a corroboration chain: reach the answer, then say the
+    # other modality agrees. Writing it as if both were required would make the reasoning dishonest.
+    corroborating = cand.get("corroborating_modality") if cand.get("quality") in ("medium", "low") else None
+    name = "think_corroborate" if corroborating and opts.get("corroborate", True) else "think"
+    fields = dict(captions=captions_text(bundle, with_refs=False)[: int(opts.get("caption_chars", 14000))],
+                  mcq=mcq_text(cand), answer=cand["answer"], evidence=evidence_text(cand),
+                  opening=opts.get("opening", "Got it!"))
+    if name == "think_corroborate":
+        fields["corroborating"] = "audio" if corroborating == "audio" else "visuals"
+    text = ctx.prompts[name].render(**fields)
     best = None
     for i in range(int(opts.get("max_attempts", 2))):
         res = ctx.models("thinker").call([{"type": "text", "text": text}], json=False, sample=i, tag="think",
@@ -93,7 +100,7 @@ def process(ctx, item):
             break
     issues, body = best
     lin = lineage.make(NAME, VERSION, [cand["id"]], **lineage_extra(ctx, sys.modules[__name__]))
-    rec = {**cand, "thinking": body, "think_qc": issues, "think_lineage": lin}
+    rec = {**cand, "thinking": body, "think_qc": issues, "think_style": name, "think_lineage": lin}
     if issues:
         return {"rejected": [{**rec, "rejected_by": "think_qc", "reason": issues[0]}]}
     return {"out": [rec]}

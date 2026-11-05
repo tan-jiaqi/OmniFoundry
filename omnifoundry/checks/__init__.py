@@ -70,16 +70,26 @@ def chain_roles(ctx, names):
 
 
 def run_chain(ctx, checks, cand, bundle, *, short_circuit=True):
-    """Returns (passed, verdicts, first_failure)."""
-    verdicts, failure = [], None
+    """Run the chain and classify failures.
+
+    Returns (hard_failure or None, verdicts, soft_failures). A hard failure means the answer is unreliable
+    and stops the chain (when short_circuit); soft failures only lower the quality tier, so the chain
+    continues and collects all of them. See omnifoundry/quality.py.
+    """
+    from ..quality import severity
+    verdicts, hard, soft = [], None, []
     for check in checks:
         v = check.run(ctx, cand, bundle)
         verdicts.append(v)
-        if not v["passed"] and failure is None:
-            failure = v
-            if short_circuit:
-                break
-    return failure is None, verdicts, failure
+        if v["passed"]:
+            continue
+        if severity(ctx, v["check"], v["reason"]) == "soft":
+            soft.append(v)
+            continue
+        hard = v
+        if short_circuit:
+            break
+    return hard, verdicts, soft
 
 
 # Import modules so their @register decorators run.

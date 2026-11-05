@@ -14,12 +14,14 @@ from ..checks.gate import modality_tags
 from ..jsonio import digest, read_jsonl
 from ..policies.retry import RETRY
 from ..policies.selector import PROMPTS as SELECTOR_PROMPTS, SELECTORS
+from ..quality import corroborating_modality, tier
 from ..schema import AUDIO_MODALITIES, MODALITIES, Candidate, fmt_range, letters, parse_range
 from .. import lineage
 from .common import captions_text, lineage_extra
 
 NAME, VERSION = "generate", 1
 CONFIG_KEYS = ("generate", "tasks", "policies.selector", "policies.retry")
+
 USES_CATALOG = True
 
 
@@ -120,39 +122,58 @@ def _generate_once(ctx, bundle, task, attempt, feedback, role):
 
 
 def process(ctx, bundle):
+    """Try task types in order; for each, generate and check, retrying with feedback.
+
+    A hard failure discards the attempt. Soft failures (the answer stands, the question is just easier than
+    intended) are retried once more for a better question, then kept: the best attempt so far is accepted at
+    the quality tier its soft failures imply (omnifoundry/quality.py).
+    """
     tasks = {t["id"]: t for t in ctx.catalog.for_route("rov")}
     picks = SELECTORS[ctx.get("policies.selector", "llm")](ctx, bundle, "rov", [])
     retry = RETRY[ctx.get("policies.retry", "with_feedback")]
     checks = chain(_checks(ctx))
     want = int(ctx.get("generate.questions_per_video", 1))
+    keep_soft = bool(ctx.get("generate.keep_soft_failures", True))
     out, rejected, verdicts = [], [], []
     if not picks:
         return {"rejected": [{"id": bundle["id"], "video_id": bundle["video_id"], "reason": "no_task_selected"}]}
+
+    def record(cand, vs, soft):
+        """Accept a candidate at the tier its soft failures imply."""
+        tags = modality_tags(vs)
+        reasons = sorted({v["reason"] for v in soft})
+        out.append({**cand, **tags, "quality": tier(reasons, tags["tags"]),
+                    "soft_failures": reasons, "corroborating_modality": corroborating_modality(tags["tags"])})
+
     for task_id in picks:
         if len(out) >= want:
             break
         task, feedback, role, attempt = tasks[task_id], [], "generator", 0
-        fallback = None   # (candidate, verdicts, index after the soft-failing check)
-        accepted = False
+        best = None          # (candidate, verdicts, soft failures) with the fewest soft failures so far
         while True:
             try:
                 cand = normalize(_generate_once(ctx, bundle, task, attempt, feedback, role), bundle, task_id, attempt, feedback, ctx)
             except ValueError as exc:
                 reason = str(exc) if str(exc) in ("options_invalid", "dag_invalid", "timestamp_not_in_captions") else "options_invalid"
-                v = {"kind": "verdict", "check": "parse", "candidate_id": f"{bundle['id']}/{task_id}/{attempt}", "passed": False,
-                     "reason": reason, "detail": {"hint": "output did not follow the required JSON structure"}}
-                verdicts.append(v)
-                cand, failure = None, v
+                failure = {"kind": "verdict", "check": "parse", "candidate_id": f"{bundle['id']}/{task_id}/{attempt}", "passed": False,
+                           "reason": reason, "detail": {"hint": "output did not follow the required JSON structure"}}
+                verdicts.append(failure)
+                cand = None
             else:
-                passed, vs, failure = run_chain(ctx, checks, cand, bundle)
+                hard, vs, soft = run_chain(ctx, checks, cand, bundle)
                 verdicts += vs
-                if passed:
-                    out.append({**cand, **modality_tags(vs)})
-                    accepted = True
+                if hard is None and not soft:
+                    record(cand, vs, [])
+                    best = None
                     break
-                rejected.append({**cand, "rejected_by": failure["check"], "reason": failure["reason"]})
-                if failure.get("detail", {}).get("soft"):
-                    fallback = (cand, vs, len(vs))
+                if hard is None:
+                    if best is None or len(soft) < len(best[2]):
+                        best = (cand, vs, soft)
+                    rejected.append({**cand, "rejected_by": soft[0]["check"], "reason": soft[0]["reason"], "soft": True})
+                    failure = soft[0]
+                else:
+                    rejected.append({**cand, "rejected_by": hard["check"], "reason": hard["reason"]})
+                    failure = hard
             decision = retry(ctx, cand, failure, attempt)
             if decision is None:
                 break
@@ -160,14 +181,8 @@ def process(ctx, bundle):
             task = tasks.get(decision.get("task_id", task["id"]), task)
             role = decision.get("role", role)
             attempt += 1
-        if not accepted and fallback:
-            # No better question came: accept the soft-failed one if it passes the remaining checks.
-            cand, vs, done = fallback
-            soft = {**vs[-1], "passed": True, "reason": "accepted_fallback"}
-            passed, rest, failure = run_chain(ctx, checks[done:], cand, bundle)
-            verdicts += [soft] + rest
-            if passed:
-                out.append({**cand, **modality_tags(vs[:-1] + [soft] + rest), "accepted_as_fallback": True})
-            else:
-                rejected.append({**cand, "rejected_by": failure["check"], "reason": failure["reason"]})
+        if best and keep_soft and len(out) < want:
+            # No clean question came out of the retries: keep the best one, downgraded.
+            cand, vs, soft = best
+            record(cand, vs, soft)
     return {"out": out, "rejected": rejected, "verdicts": verdicts}

@@ -98,11 +98,22 @@ Not implemented yet: the RBY (reasoning beyond video) route, the `refine` repair
 | m1e-001 | correctness filters; shortcut tagging, reject only if both modalities suffice (`m1e.yaml`) | 12 / 208 | About 0.74M tokens per final question; 2 of 12 are `av_strict` |
 | m1f-001 | prompt rule 10 (audio cue must not name on-screen words); visual shortcut triggers a soft retry (`m1f.yaml`) | 12 / 272 | No change in the tag mix: audio and visuals are redundant in the source videos (alphabet songs, captioned explainers), so selection matters more than prompt wording |
 
+| m1g-001 | keep soft failures at a lower quality tier instead of discarding (`m1g.yaml`, `quality.py`) | 31 / 188 | 3 high, 10 medium, 18 low from the same 50 videos |
+
 Human review of m1e-001 (12/12): every answer correct, but 5 questions were answerable with the sound off,
 because the audio cue named a letter, word or name also shown on screen.
 
-Data tags (in `sft.jsonl` / `rl.jsonl`): `av_strict` (neither audio alone nor visuals alone answers: the
-high-quality subset), `audio_sufficient`, `visual_sufficient`, with the per-condition counts in `modality_dependency`.
+Each exported row carries `quality` (`high` / `medium` / `low`), the `soft_failures` that downgraded it, and
+modality tags `av_strict` / `audio_sufficient` / `visual_sufficient` with per-condition counts in
+`modality_dependency`. A hard failure (wrong answer, clue contradicted by the media, unsupported
+presupposition, bad structure) still discards the question; a soft failure (guessable from the question, or
+answerable from one modality) only lowers the tier, and the thinking is then written as corroboration rather
+than as a chain that pretends both modalities were needed. See `omnifoundry/quality.py`.
+
+For comparison, OmniQA discards nothing here: its visual shortcut test shows the model only ONE random
+event segment (`reference/OmniReasoning/src/OmniQA/verification/modality_gate.py:425-460`), its complement
+test is inert because `segment_id` is never generated, and either test passing is enough. Our gates compare
+against the full single-modality captions and real muted / audio-only media.
 
 ## Known gateway behaviour
 

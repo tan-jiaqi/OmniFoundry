@@ -1,0 +1,9 @@
+# M1g: same 50 videos. Instead of discarding questions that only failed "soft" checks (guessable from the
+# question, or answerable from one modality), keep them at a lower quality tier with the reason recorded:
+#   high    neither modality alone answers
+#   medium  one modality answers, the other corroborates (thinking written as corroboration)
+#   low     guessable from the question alone, or neither modality needed
+# Hard failures (wrong answer, clue contradicted by the media, unsupported presupposition, bad structure)
+# are still discarded. See omnifoundry/quality.py.
+extends: m1f.yaml
+generate: {keep_soft_failures: true}

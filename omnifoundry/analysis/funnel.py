@@ -45,7 +45,10 @@ def funnel(run_dir):
                 hr[tag]["blind_correct"] += r.get("human_answer") == r.get("gold")
                 hr[tag]["needs_both"] += r.get("needs") == "both"
         out["human_review"] = {k: dict(v) for k, v in hr.items()}
-    out["final_tags"] = dict(Counter(t for c in read_jsonl(run_dir / "think" / "out.jsonl") for t in c.get("tags", [])))
+    final = read_jsonl(run_dir / "think" / "out.jsonl")
+    out["final_tags"] = dict(Counter(t for c in final for t in c.get("tags", [])))
+    out["final_quality"] = dict(Counter(c.get("quality") or "untiered" for c in final))
+    out["soft_failures"] = dict(Counter(r for c in final for r in c.get("soft_failures", [])))
 
     by_task = defaultdict(Counter)
     for c in read_jsonl(run_dir / "generate" / "rejected.jsonl"):
@@ -81,6 +84,10 @@ def render(f):
         for k, n in sv.items():
             if k != "attempts":
                 lines.append(f"  {k:14} {n:4}  {n / sv['attempts']:6.1%}")
+    if f.get("final_quality"):
+        lines.append("\nfinal data by quality: " + ", ".join(f"{k}={v}" for k, v in sorted(f["final_quality"].items())))
+        if f.get("soft_failures"):
+            lines.append("  downgraded because: " + ", ".join(f"{k}={v}" for k, v in sorted(f["soft_failures"].items())))
     if f.get("final_tags"):
         lines.append("\nfinal data by tag: " + ", ".join(f"{k}={v}" for k, v in sorted(f["final_tags"].items())))
     if f.get("human_review"):

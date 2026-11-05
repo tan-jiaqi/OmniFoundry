@@ -7,6 +7,7 @@ import sys
 
 from ..checks import chain, chain_prompts, chain_roles, run_chain
 from ..checks.gate import modality_tags
+from ..quality import corroborating_modality, tier
 from ..jsonio import read_jsonl
 from .. import lineage
 from .common import lineage_extra
@@ -40,14 +41,17 @@ def inputs(ctx, prev_dir):
 
 def process(ctx, item):
     cand, bundle = item["candidate"], item["bundle"]
-    passed, verdicts, failure = run_chain(ctx, chain(_checks(ctx)), cand, bundle,
-                                          short_circuit=ctx.get("verify.short_circuit", True))
+    hard, verdicts, soft = run_chain(ctx, chain(_checks(ctx)), cand, bundle,
+                                     short_circuit=ctx.get("verify.short_circuit", True))
     lin = lineage.make(NAME, VERSION, [cand["id"], bundle["id"]], **lineage_extra(ctx, sys.modules[__name__]))
     summary = {v["check"]: {"passed": v["passed"], "reason": v["reason"], "detail": v.get("detail", {})} for v in verdicts}
     rec = {**cand, "verify": summary, "verify_lineage": lin}
     tags = modality_tags(verdicts)
-    if tags["modality_dependency"]:
+    if tags["modality_dependency"]:                     # real media beats caption-based tags
         rec.update(tags)
-    if passed:
-        return {"out": [rec], "verdicts": verdicts}
-    return {"rejected": [{**rec, "rejected_by": failure["check"], "reason": failure["reason"]}], "verdicts": verdicts}
+    if hard is not None:
+        return {"rejected": [{**rec, "rejected_by": hard["check"], "reason": hard["reason"]}], "verdicts": verdicts}
+    reasons = sorted(set(rec.get("soft_failures", [])) | {v["reason"] for v in soft})
+    rec.update(soft_failures=reasons, quality=tier(reasons, rec.get("tags", [])),
+               corroborating_modality=corroborating_modality(rec.get("tags", [])))
+    return {"out": [rec], "verdicts": verdicts}
