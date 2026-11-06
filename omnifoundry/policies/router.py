@@ -33,4 +33,12 @@ class ModelRouter:
         return self._clients[role]
 
     def model_ids(self, *roles):
+        """Readable model names, for lineage."""
         return {r: self.options(r).get("model", "") for r in roles}
+
+    def identities(self, *roles):
+        """Everything about a role that changes what the model returns: model, temperature, max_tokens,
+        extra_body and so on, minus transport settings. Stage cache keys use this, not just the model name,
+        so changing a role's sampling options recomputes the stages that use it."""
+        from ..llm import NON_IDENTITY
+        return {r: {k: v for k, v in self.options(r).items() if k not in NON_IDENTITY} for r in roles}

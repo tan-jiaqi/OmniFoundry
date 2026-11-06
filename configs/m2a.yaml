@@ -1,0 +1,8 @@
+# M2a: gate threshold calibration only, on the same 50 videos as m1g (everything upstream is a cache hit).
+# Evidence: 31 human judgments on runs/m1g-001. With max_correct=1 (shortcut if a single modality answers
+# >=2 of 3 draws) the media gate called 4 questions joint and missed 11 the reviewer judged joint. With
+# max_correct=2 (shortcut only on 3 of 3) it calls 14 joint, 12 of which the reviewer agrees with.
+# gate_text keeps the stricter threshold: it runs inside generate as a cheap pre-filter.
+extends: m1g.yaml
+checks:
+  gate_media: {max_correct: 2}

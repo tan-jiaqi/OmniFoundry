@@ -115,6 +115,43 @@ class TestDeterministicChecks(unittest.TestCase):
         self.assertFalse(quote_matches("rain", "heavy storm", .6, 4))
 
 
+class TestAnchorMiner(unittest.TestCase):
+    def bundle(self):
+        b = bundle()
+        b["audio_captions"].append({"ref": "e01.a3", "event_id": "e01", "start_s": 12, "end_s": 15,
+                                    "timestamp": "00:12-00:15", "audio_type": "speech",
+                                    "caption": "The host says welcome to the workshop today"})      # duplicate wording
+        b["visual_captions"].append({"ref": "e01.v2", "event_id": "e01", "start_s": 12, "end_s": 15,
+                                     "timestamp": "00:12-00:15", "caption": "A teal jacket hangs on a hook"})
+        b["visual_captions"][0]["caption"] += " in the workshop"      # anchor word visible on screen
+        return b
+
+    def test_rules(self):
+        from omnifoundry.policies.anchor_miner import mine
+        anchors = {a["audio_ref"]: a for a in mine(self.bundle())}
+        self.assertNotIn("e01.a2", anchors)                      # background audio is never an anchor
+        self.assertIn("e01.a1", anchors)
+        self.assertEqual(anchors["e01.a1"]["uniqueness"], 0.0)   # every word recurs in the duplicate entry
+        self.assertGreater(anchors["e01.a1"]["leak"], 0)         # "workshop" also appears in a visual caption
+        self.assertEqual(anchors["e01.a1"]["visual_refs"], ["e01.v1"])
+
+    def test_no_visual_no_anchor(self):
+        from omnifoundry.policies.anchor_miner import mine
+        b = bundle()
+        b["visual_captions"] = [{**b["visual_captions"][0], "start_s": 300, "end_s": 305}]
+        self.assertEqual(mine(b), [])
+
+    def test_diversity_cap(self):
+        from omnifoundry.policies.anchor_miner import mine
+        b = self.bundle()
+        for i in range(4, 9):                                    # five more anchorable entries in one event
+            b["audio_captions"].append({"ref": f"e01.a{i}", "event_id": "e01", "start_s": i, "end_s": i + 1,
+                                        "timestamp": f"00:0{i}-00:0{i+1}", "audio_type": "sound",
+                                        "caption": f"A distinctive clang number {i} rings out"})
+        self.assertEqual(len(mine(b, {"max_per_event": 2})), 2)
+        self.assertEqual(len(mine(b, {"max_per_event": 99, "limit": 3})), 3)
+
+
 class TestGateModes(unittest.TestCase):
     def evaluate(self, audio, visual, mode, full=3):
         from omnifoundry.checks.gate import _evaluate
@@ -262,6 +299,12 @@ class TestEndToEnd(unittest.TestCase):
         self.assertFalse((self.tmp / "run2" / "calls.jsonl").exists())
         self.assertEqual(read_jsonl(self.tmp / "run2" / "export" / "sft.jsonl"), sft)
 
+    def test_role_option_change_invalidates_stage(self):
+        self.run_cli("opt_a", "--set", "verify.checks=[clue]")
+        out = self.run_cli("opt_b", "--set", "verify.checks=[clue]", "--set", "models.generator.temperature=0.9")
+        self.assertIn("[caption] items=2 cache_hits=2", out)      # captions use another role: still cached
+        self.assertIn("[generate] items=2 cache_hits=0", out)     # the generator's sampling changed
+
     def test_code_change_keeps_stage_cache(self):
         self.run_cli("code_a")
         from omnifoundry import lineage
@@ -309,6 +352,34 @@ class TestEndToEnd(unittest.TestCase):
         sft = read_jsonl(run / "export" / "sft.jsonl")
         self.assertEqual([r["quality"] for r in sft], ["medium", "medium"])
         self.assertEqual(funnel(run)["final_quality"], {"medium": 2})
+
+    def test_fanout_unavailable_and_dedupe(self):
+        # fan-out: one question per anchor, up to the per-video quota
+        out = self.run_cli("fan", "--set", "generate.questions_per_video=3", "--set", "verify.checks=[clue]")
+        acc = read_jsonl(self.tmp / "fan" / "generate" / "out.jsonl")
+        self.assertEqual(len(acc), 4, out)                        # 2 videos x 2 anchors
+        self.assertEqual(len({c["video_id"] for c in acc}), 2)
+        # dedupe is per video; both synthetic videos are identical, so 2 distinct texts, 2 per video
+        self.assertEqual(len({c["question"] for c in acc}), 2)
+        for vid in {c["video_id"] for c in acc}:
+            self.assertEqual(len({c["question"] for c in acc if c["video_id"] == vid}), 2)
+        self.assertTrue(all(c["anchor"]["audio_ref"] for c in acc))
+
+        # [Unavailable] skips an anchor without spending checks or a retry
+        out = self.run_cli("decl", "--set", "generate.questions_per_video=3", "--set", "verify.checks=[clue]",
+                           "--set", "models.generator.decline_anchor=true")
+        acc = read_jsonl(self.tmp / "decl" / "generate" / "out.jsonl")
+        self.assertEqual(len(acc), 2)                             # only the e01.a1 anchor is accepted per video
+        declined = [c for c in read_jsonl(self.tmp / "decl" / "generate" / "rejected.jsonl")]
+        self.assertFalse([c for c in declined if c["reason"] == "duplicate_question"])
+
+        # identical questions from different anchors are deduped within a video
+        out = self.run_cli("dup", "--set", "generate.questions_per_video=3", "--set", "verify.checks=[clue]",
+                           "--set", "models.generator.duplicate_questions=true")
+        acc = read_jsonl(self.tmp / "dup" / "generate" / "out.jsonl")
+        self.assertEqual(len(acc), 2)
+        # the first attempt always fails grounding on purpose; what matters is that the repeat was deduped
+        self.assertIn("duplicate_question", {r["reason"] for r in read_jsonl(self.tmp / "dup" / "generate" / "rejected.jsonl")})
 
     def test_hard_failure_still_discards(self):
         out = self.run_cli("hard", "--set", "checks.clue.min_strength=0.95")

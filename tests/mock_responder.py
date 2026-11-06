@@ -36,13 +36,21 @@ def respond(role, parts, options):
     if role == "selector":
         return json.dumps({"task_ids": ["attribute"], "reason": "mock"})
     if role == "generator":
+        if options.get("decline_anchor"):
+            given = re.search(r"AUDIO ANCHOR \[(\S+)\]", text)
+            if given and not given[1].endswith("e01.a1"):
+                return "[Unavailable] mock declines every anchor but the first"
         first = "first attempt" in text
-        a = re.search(r"AUDIO \[(\S+)\] (\S+) \(speech\): (.+)", text)
-        v = re.search(r"VISUAL \[(\S+)\] (\S+): (.+)", text)
+        # prefer the given anchor; fall back to the first caption of each modality
+        anc = re.search(r"AUDIO ANCHOR \[(\S+)\] (\S+) \(\w+\): (.+)", text)
+        a = anc or re.search(r"AUDIO \[(\S+)\] (\S+) \(speech\): (.+)", text)
+        vis = re.search(r"CO-OCCURRING VISUALS:\n\s*\[(\S+)\] (\S+): (.+)", text)
+        v = vis or re.search(r"VISUAL \[(\S+)\] (\S+): (.+)", text)
         quote = "words that never appear anywhere at all in this video" if first else a[3]
         options_ = [f"{CORRECT}"] + [f"distractor number {i}" for i in range(1, 8)]
+        tail = "" if options.get("duplicate_questions") else f" at {a[2]}"
         return json.dumps({
-            "question": "Which panel is on screen after the narrator says the code word?",
+            "question": f"Which panel is on screen after the narrator says the code word{tail}?",
             "options": [f"{chr(65 + i)}. {o}" for i, o in enumerate(options_)], "answer": "A",
             "clues": [{"id": "c1", "modality": "speech", "timestamp": a[2], "quote": quote, "fact": "narrator says the code word", "caption_ref": a[1]},
                       {"id": "c2", "modality": "visual", "timestamp": v[2], "quote": v[3], "fact": "panel number visible", "caption_ref": v[1]}],

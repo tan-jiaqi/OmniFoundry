@@ -1,9 +1,12 @@
 """S2 generate (ROV, reasoning over video): CaptionBundle -> Candidates.
 
-For each video: the TaskSelector policy proposes task types; for each, the generator writes an MCQ with
-an evidence chain; the `generate.checks` chain screens it; on failure the RetryPolicy decides whether to
-regenerate with feedback. Every attempt and verdict is kept (rejected attempts go to rejected.jsonl), so
-later analysis can see where and why generation fails per task type.
+The AnchorMiner enumerates cross-modal anchors in the captions and the TaskSelector proposes task types;
+each (anchor, task) pair is one generation attempt, so one video yields several questions instead of one
+(JointAVBench fans out over segment x task: reference/JointAVBench/generation_pipeline/generate_qa.py:93-151).
+The generator writes an MCQ with an evidence chain, or replies `[Unavailable]` when the anchor cannot carry
+that task -- a free skip that costs no checks. The `generate.checks` chain then screens it; on failure the
+RetryPolicy decides whether to regenerate with feedback, and a candidate that only failed soft checks is
+kept at a lower quality tier (quality.py). Every attempt and verdict is written out.
 """
 import random
 import re
@@ -11,7 +14,8 @@ import sys
 
 from ..checks import chain, chain_prompts, chain_roles, run_chain
 from ..checks.gate import modality_tags
-from ..jsonio import digest, read_jsonl
+from ..jsonio import digest, parse_json_text, read_jsonl
+from ..policies.anchor_miner import MINERS, anchor_text
 from ..policies.retry import RETRY
 from ..policies.selector import PROMPTS as SELECTOR_PROMPTS, SELECTORS
 from ..quality import corroborating_modality, tier
@@ -20,7 +24,7 @@ from .. import lineage
 from .common import captions_text, lineage_extra
 
 NAME, VERSION = "generate", 1
-CONFIG_KEYS = ("generate", "tasks", "policies.selector", "policies.retry")
+CONFIG_KEYS = ("generate", "tasks", "policies.selector", "policies.retry", "policies.anchors", "anchors")
 
 USES_CATALOG = True
 
@@ -110,49 +114,89 @@ def normalize(raw, bundle, task_id, attempt, feedback, ctx):
 
 # ---- process ------------------------------------------------------------------------------------
 
-def _generate_once(ctx, bundle, task, attempt, feedback, role):
+UNAVAILABLE = "[unavailable]"
+
+
+def bridge_text(task):
+    b = task.get("bridge")
+    if not b:
+        return ""
+    return (f"Bridge: the {b['referent_modality']} identifies what the question is about; the answer must come from "
+            f"the {b['answer_modality']}.\nRequired condition: {b['uniqueness']}\n"
+            f"Reply [Unavailable] if: {b['unavailable_if']}")
+
+
+def _generate_once(ctx, bundle, task, anchor, attempt, feedback, role):
+    """Returns the parsed JSON, or None when the model declined this anchor with [Unavailable]."""
     fb = "\n".join(f"- {f}" for f in feedback) if feedback else "(none: first attempt)"
     text = ctx.prompts["generate"].render(
         task_id=task["id"], task_name=task["name"], task_kind=task.get("kind", "anchor"),
         task_definition=task["definition"].strip(), task_rules="\n".join(f"- {r}" for r in task.get("rules", [])) or "(none)",
+        bridge=bridge_text(task), anchor=anchor_text(bundle, anchor) if anchor else "(no anchor given: choose the strongest cross-modal moment yourself)",
         num_options=ctx.get("checks.structure.num_options", 8), captions=captions_text(bundle), feedback=fb)
-    res = ctx.models(role).call([{"type": "text", "text": text}], tag="generate", sample=attempt,
-                                context={"bundle": bundle["id"], "task": task["id"], "attempt": attempt})
-    return res["json"]
+    res = ctx.models(role).call([{"type": "text", "text": text}], json=False, tag="generate", sample=attempt,
+                                context={"bundle": bundle["id"], "task": task["id"], "anchor": (anchor or {}).get("audio_ref"),
+                                         "attempt": attempt})
+    body = (res.get("text") or "").strip()
+    if body[:13].lower().startswith(UNAVAILABLE):
+        return None
+    return parse_json_text(body)
+
+
+def fingerprint(cand):
+    """Normalized question text, to drop near-duplicates mined from neighbouring anchors."""
+    return re.sub(r"[^a-z0-9 ]", "", cand["question"].lower())[:160]
+
+
+def work_items(ctx, bundle, picks):
+    """(anchor, task_id) pairs to try, best anchor first, cycling through the selected task types."""
+    anchors = MINERS[ctx.get("policies.anchors", "default")](bundle, ctx.get("anchors", {}))
+    if not anchors:
+        return [(None, t) for t in picks]
+    return [(a, picks[i % len(picks)]) for i, a in enumerate(anchors)]
 
 
 def process(ctx, bundle):
-    """Try task types in order; for each, generate and check, retrying with feedback.
+    """Generate one question per (anchor, task) pair until the per-video quota is met.
 
     A hard failure discards the attempt. Soft failures (the answer stands, the question is just easier than
     intended) are retried once more for a better question, then kept: the best attempt so far is accepted at
-    the quality tier its soft failures imply (omnifoundry/quality.py).
+    the quality tier its soft failures imply (omnifoundry/quality.py). `[Unavailable]` skips an anchor for
+    free, without spending checks or a retry.
     """
     tasks = {t["id"]: t for t in ctx.catalog.for_route("rov")}
     picks = SELECTORS[ctx.get("policies.selector", "llm")](ctx, bundle, "rov", [])
     retry = RETRY[ctx.get("policies.retry", "with_feedback")]
     checks = chain(_checks(ctx))
     want = int(ctx.get("generate.questions_per_video", 1))
+    budget = int(ctx.get("generate.max_total_attempts", 4 * want))
     keep_soft = bool(ctx.get("generate.keep_soft_failures", True))
-    out, rejected, verdicts = [], [], []
+    out, rejected, verdicts, seen, spent, skipped = [], [], [], set(), 0, 0
     if not picks:
         return {"rejected": [{"id": bundle["id"], "video_id": bundle["video_id"], "reason": "no_task_selected"}]}
 
-    def record(cand, vs, soft):
+    def record(cand, vs, soft, anchor):
         """Accept a candidate at the tier its soft failures imply."""
         tags = modality_tags(vs)
         reasons = sorted({v["reason"] for v in soft})
-        out.append({**cand, **tags, "quality": tier(reasons, tags["tags"]),
-                    "soft_failures": reasons, "corroborating_modality": corroborating_modality(tags["tags"])})
+        out.append({**cand, **tags, "quality": tier(reasons, tags["tags"]), "soft_failures": reasons,
+                    "corroborating_modality": corroborating_modality(tags["tags"]),
+                    "anchor": {k: anchor[k] for k in ("audio_ref", "score", "uniqueness", "leak")} if anchor else None})
+        seen.add(fingerprint(cand))
 
-    for task_id in picks:
-        if len(out) >= want:
+    for anchor, task_id in work_items(ctx, bundle, picks):
+        if len(out) >= want or spent >= budget:
             break
         task, feedback, role, attempt = tasks[task_id], [], "generator", 0
         best = None          # (candidate, verdicts, soft failures) with the fewest soft failures so far
         while True:
+            spent += 1
             try:
-                cand = normalize(_generate_once(ctx, bundle, task, attempt, feedback, role), bundle, task_id, attempt, feedback, ctx)
+                raw = _generate_once(ctx, bundle, task, anchor, attempt, feedback, role)
+                if raw is None:                      # the model declined this anchor
+                    skipped += 1
+                    break
+                cand = normalize(raw, bundle, task_id, attempt, feedback, ctx)
             except ValueError as exc:
                 reason = str(exc) if str(exc) in ("options_invalid", "dag_invalid", "timestamp_not_in_captions") else "options_invalid"
                 failure = {"kind": "verdict", "check": "parse", "candidate_id": f"{bundle['id']}/{task_id}/{attempt}", "passed": False,
@@ -160,10 +204,13 @@ def process(ctx, bundle):
                 verdicts.append(failure)
                 cand = None
             else:
+                if fingerprint(cand) in seen:
+                    rejected.append({**cand, "rejected_by": "dedupe", "reason": "duplicate_question"})
+                    break
                 hard, vs, soft = run_chain(ctx, checks, cand, bundle)
                 verdicts += vs
                 if hard is None and not soft:
-                    record(cand, vs, [])
+                    record(cand, vs, [], anchor)
                     best = None
                     break
                 if hard is None:
@@ -175,14 +222,15 @@ def process(ctx, bundle):
                     rejected.append({**cand, "rejected_by": hard["check"], "reason": hard["reason"]})
                     failure = hard
             decision = retry(ctx, cand, failure, attempt)
-            if decision is None:
+            if decision is None or spent >= budget:
                 break
             feedback = feedback + [decision["feedback"]]
             task = tasks.get(decision.get("task_id", task["id"]), task)
             role = decision.get("role", role)
             attempt += 1
-        if best and keep_soft and len(out) < want:
+        if best and keep_soft and len(out) < want and fingerprint(best[0]) not in seen:
             # No clean question came out of the retries: keep the best one, downgraded.
             cand, vs, soft = best
-            record(cand, vs, soft)
-    return {"out": out, "rejected": rejected, "verdicts": verdicts}
+            record(cand, vs, soft, anchor)
+    return {"out": out, "rejected": rejected, "verdicts": verdicts,
+            "stats": {"attempts": spent, "unavailable": skipped}}

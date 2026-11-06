@@ -4,12 +4,18 @@ Question type: {task_name} (id: {task_id}, kind: {task_kind})
 Definition: {task_definition}
 Type rules:
 {task_rules}
+{bridge}
 
 Captions (each entry has a [ref]):
 {captions}
 
+Build the question around THIS anchor. The anchor is the moment the question points to; the answer must be something else, observed in the other modality:
+{anchor}
+
 Feedback on earlier failed attempts for this video:
 {feedback}
+
+If this anchor cannot carry a question of this type that satisfies every requirement below, reply with exactly `[Unavailable]` and a one-line reason, and write nothing else. Do not force a weak question: a skipped anchor costs nothing, a bad question costs a lot.
 
 Requirements:
 1. Exactly {num_options} options. All are plausible and similar in length and style. Include distractors that are right for only one modality.

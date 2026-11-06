@@ -44,7 +44,7 @@ def item_key(ctx, stage, item):
     return digest("stage", stage.NAME, stage.VERSION, _content(item),
                   section_hash(ctx.config, *config_keys(ctx, stage)),
                   ctx.prompts.hashes(*stage.prompts(ctx)),
-                  ctx.models.model_ids(*stage.roles(ctx)),
+                  ctx.models.identities(*stage.roles(ctx)),
                   ctx.catalog.hash if getattr(stage, "USES_CATALOG", False) else None)
 
 

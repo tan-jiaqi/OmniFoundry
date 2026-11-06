@@ -1,151 +1,260 @@
 # Task catalog: what kinds of questions the engine can ask.
 # The 13 ROV task families follow the OmniQA taxonomy (reference/OmniReasoning/src/OmniQA/generation/task_types.py);
-# definitions here are our own wording. `capabilities` map to the A–I classes in
+# `absence` is adapted from TraceAV-Bench's hallucination tasks. `capabilities` map to the A-I classes in
 # archive/OmniFoundry-next/docs/OMNI_BENCHMARK_DATASET_QA_CAPABILITIES.md.
 #
 # kind: anchor   = a cue in one modality picks the referent; the answer lies in the other modality.
 #       holistic = the answer needs integrating both modalities across a span.
+# bridge: which modality identifies the referent, which carries the answer, the condition that makes the
+#         cross-modal link load-bearing, and when to abort (after JointAVBench's per-task instructions,
+#         reference/JointAVBench/generation_pipeline/prompts.py:3,7,9).
 # Weights and enable lists are set in configs (tasks.weights, catalog.enabled), not here.
 
 tasks:
-  - id: counting
-    route: rov
-    name: Cross-modal counting
-    kind: anchor
-    capabilities: [C]
-    definition: >
-      Ask for an integer count. One modality identifies what to count (or when); the occurrences
-      themselves are only observable in the other modality.
-    rules:
-      - The number must never be stated aloud or written on screen.
-      - Occurrences must be clearly separable in the captions.
+- id: counting
+  route: rov
+  name: Cross-modal counting
+  kind: anchor
+  capabilities:
+  - C
+  definition: 'Ask for an integer count. One modality identifies what to count (or when); the occurrences themselves are
+    only observable in the other modality.
 
-  - id: spatial
-    route: rov
-    name: Audio-anchored spatial reasoning
-    kind: anchor
-    capabilities: [E, B2]
-    definition: >
-      Ask where something is on screen, or how it sits relative to something else, where the target
-      can only be identified from what is heard.
-    rules:
-      - The visual description of the target must not appear in the question.
+    '
+  rules:
+  - The number must never be stated aloud or written on screen.
+  - Occurrences must be clearly separable in the captions.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: several instances of the same kind occur; only the audio cue delimits which stretch to count
+    unavailable_if: the count is spoken aloud, or only one instance exists
+- id: spatial
+  route: rov
+  name: Audio-anchored spatial reasoning
+  kind: anchor
+  capabilities:
+  - E
+  - B2
+  definition: 'Ask where something is on screen, or how it sits relative to something else, where the target can only be
+    identified from what is heard.
 
-  - id: attribute
-    route: rov
-    name: Audio-anchored visual attribute
-    kind: anchor
-    capabilities: [A2, B1]
-    definition: >
-      Ask for a visual attribute (color, clothing, shape, on-screen text) of a referent that only the
-      audio singles out among visually similar alternatives.
-    rules:
-      - Distractors should be attributes of other entities visible in the same video.
+    '
+  rules:
+  - The visual description of the target must not appear in the question.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: at least two similar objects or people are on screen; only the audio says which one
+    unavailable_if: the audio states the position, or only one candidate is visible
+- id: attribute
+  route: rov
+  name: Audio-anchored visual attribute
+  kind: anchor
+  capabilities:
+  - A2
+  - B1
+  definition: 'Ask for a visual attribute (color, clothing, shape, on-screen text) of a referent that only the audio singles
+    out among visually similar alternatives.
 
-  - id: sound_event
-    route: rov
-    name: Sound and event identification
-    kind: anchor
-    capabilities: [A1, B1]
-    definition: >
-      Identify a sound, event or scene where one modality disambiguates the other: which sound occurs
-      during a visible action, or which action accompanies a distinctive sound.
-    rules:
-      - The sound must be distinctive, not generic background.
+    '
+  rules:
+  - Distractors should be attributes of other entities visible in the same video.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: at least two visually similar candidates are on screen; only the audio cue tells them apart
+    unavailable_if: the attribute is spoken aloud, or only one candidate is visible
+- id: sound_event
+  route: rov
+  name: Sound and event identification
+  kind: anchor
+  capabilities:
+  - A1
+  - B1
+  definition: 'Identify a sound, event or scene where one modality disambiguates the other: which sound occurs during a
+    visible action, or which action accompanies a distinctive sound.
 
-  - id: temporal
-    route: rov
-    name: Mixed-modality temporal reasoning
-    kind: anchor
-    capabilities: [D1, D2]
-    definition: >
-      Order 3 to 4 events drawn from both modalities, or locate when an audio-visual event happens
-      relative to another.
-    rules:
-      - Events must be clearly separated in time; avoid overlapping spans.
+    '
+  rules:
+  - The sound must be distinctive, not generic background.
+  bridge:
+    referent_modality: visual
+    answer_modality: audio
+    uniqueness: the visuals alone cannot say what is heard at that moment
+    unavailable_if: on-screen text names the sound, or the visuals plainly show the source
+- id: temporal
+  route: rov
+  name: Mixed-modality temporal reasoning
+  kind: anchor
+  capabilities:
+  - D1
+  - D2
+  definition: 'Order 3 to 4 events drawn from both modalities, or locate when an audio-visual event happens relative to
+    another.
 
-  - id: prediction
-    route: rov
-    name: What happens next
-    kind: anchor
-    capabilities: [D4]
-    definition: >
-      Given audio and visual context up to a point, ask what happens next, where the continuation is
-      observable in the video and is signalled by the earlier joint context.
-    rules:
-      - The earlier context must make the answer reasonably inferable, not a coin flip.
+    '
+  rules:
+  - Events must be clearly separated in time; avoid overlapping spans.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: the events to order come from both modalities, not all from one
+    unavailable_if: the order can be read off a single modality
+- id: prediction
+  route: rov
+  name: What happens next
+  kind: anchor
+  capabilities:
+  - D4
+  definition: 'Given audio and visual context up to a point, ask what happens next, where the continuation is observable
+    in the video and is signalled by the earlier joint context.
 
-  - id: causal
-    route: rov
-    name: Cross-modal causal reasoning
-    kind: anchor
-    capabilities: [G1]
-    definition: >
-      Ask why something happened (or what would differ if it had not), where the cause is in one
-      modality and the effect in the other.
-    rules:
-      - The causal link must be supported by the video, not by general world knowledge alone.
+    '
+  rules:
+  - The earlier context must make the answer reasonably inferable, not a coin flip.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: the continuation is set up jointly by what is seen and what is heard
+    unavailable_if: either modality alone makes the continuation obvious
+- id: causal
+  route: rov
+  name: Cross-modal causal reasoning
+  kind: anchor
+  capabilities:
+  - G1
+  definition: 'Ask why something happened (or what would differ if it had not), where the cause is in one modality and the
+    effect in the other.
 
-  - id: emotion
-    route: rov
-    name: Voice-carried emotion of a visible person
-    kind: anchor
-    capabilities: [F]
-    definition: >
-      A person is picked out visually; the emotion or attitude to identify is carried by their voice.
-    rules:
-      - The transcript words alone must not give the emotion away.
+    '
+  rules:
+  - The causal link must be supported by the video, not by general world knowledge alone.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: cause and effect sit in different modalities
+    unavailable_if: the causal chain is complete within one modality
+- id: emotion
+  route: rov
+  name: Voice-carried emotion of a visible person
+  kind: anchor
+  capabilities:
+  - F
+  definition: 'A person is picked out visually; the emotion or attitude to identify is carried by their voice.
 
-  - id: music
-    route: rov
-    name: Function of non-speech audio
-    kind: holistic
-    capabilities: [F, A1]
-    definition: >
-      Ask how music or sound effects function relative to what is shown (mood shift, emphasis, marking a
-      transition).
-    rules:
-      - Do not build on speech.
-      - Only choose this when the captions contain specific music or sound-effect entries.
+    '
+  rules:
+  - The transcript words alone must not give the emotion away.
+  bridge:
+    referent_modality: visual
+    answer_modality: audio
+    uniqueness: at least two people are on screen; only the voice says whose emotion is meant
+    unavailable_if: the words themselves or the face alone give the emotion away
+- id: music
+  route: rov
+  name: Function of non-speech audio
+  kind: holistic
+  capabilities:
+  - F
+  - A1
+  definition: 'Ask how music or sound effects function relative to what is shown (mood shift, emphasis, marking a transition).
 
-  - id: relationship
-    route: rov
-    name: Social and functional relationships
-    kind: holistic
-    capabilities: [G2]
-    definition: >
-      Infer the relationship between people from what they say together with how they interact on screen.
-    rules:
-      - Neither dialogue alone nor visuals alone should settle it.
+    '
+  rules:
+  - Do not build on speech.
+  - Only choose this when the captions contain specific music or sound-effect entries.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: the music has a recognisable shift in mood or function that lines up with a visual change
+    unavailable_if: the mood follows directly from the visuals
+- id: relationship
+  route: rov
+  name: Social and functional relationships
+  kind: holistic
+  capabilities:
+  - G2
+  definition: 'Infer the relationship between people from what they say together with how they interact on screen.
 
-  - id: consistency
-    route: rov
-    name: Audio-visual consistency
-    kind: anchor
-    capabilities: [I, B1]
-    definition: >
-      Ask which mentioned item actually appears, which spoken statement the visuals contradict, or where
-      audio and visuals disagree.
-    rules:
-      - The mismatch must be explicit in the captions of both modalities.
+    '
+  rules:
+  - Neither dialogue alone nor visuals alone should settle it.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: the relationship needs both the dialogue and the on-screen interaction
+    unavailable_if: dialogue alone or visuals alone settle it
+- id: consistency
+  route: rov
+  name: Audio-visual consistency
+  kind: anchor
+  capabilities:
+  - I
+  - B1
+  definition: 'Ask which mentioned item actually appears, which spoken statement the visuals contradict, or where audio
+    and visuals disagree.
 
-  - id: reference
-    route: rov
-    name: Spoken reference resolution
-    kind: anchor
-    capabilities: [B2, B3, H]
-    definition: >
-      Bind a spoken mention to one of several visually similar referents, possibly far apart in time.
-    rules:
-      - The link between mention and referent must be established by the video itself.
+    '
+  rules:
+  - The mismatch must be explicit in the captions of both modalities.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: both modalities state something checkable about the same moment
+    unavailable_if: the inconsistency lies within one modality
+- id: reference
+  route: rov
+  name: Spoken reference resolution
+  kind: anchor
+  capabilities:
+  - B2
+  - B3
+  - H
+  definition: 'Bind a spoken mention to one of several visually similar referents, possibly far apart in time.
 
-  - id: summary
-    route: rov
-    name: Joint summary
-    kind: holistic
-    capabilities: [H]
-    definition: >
-      Ask for the option that best summarizes the video, where narration and visuals each contribute
-      facts that the correct option needs.
-    rules:
-      - Distractors should each be correct for only one modality or only part of the video.
+    '
+  rules:
+  - The link between mention and referent must be established by the video itself.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: at least two similar referents appear; only the spoken mention picks one
+    unavailable_if: the audio already describes the referent’s appearance
+- id: summary
+  route: rov
+  name: Joint summary
+  kind: holistic
+  capabilities:
+  - H
+  definition: 'Ask for the option that best summarizes the video, where narration and visuals each contribute facts that
+    the correct option needs.
+
+    '
+  rules:
+  - Distractors should each be correct for only one modality or only part of the video.
+  bridge:
+    referent_modality: audio
+    answer_modality: visual
+    uniqueness: the correct option needs a narration fact and a visual fact together
+    unavailable_if: one modality alone supports the correct option
+- id: absence
+  route: rov
+  name: Absence judgement
+  kind: anchor
+  capabilities:
+  - I
+  - B1
+  definition: 'The visuals establish a scene in which some sound would be expected. Ask whether that sound is actually heard,
+    where the true answer is often that it never occurs.
+
+    '
+  rules:
+  - The expected sound must be plausible from the visuals alone.
+  - Only claim absence when no audio caption anywhere in the video reports that sound.
+  - Distractors name sounds that do occur elsewhere in the video, so the answer is not guessable.
+  bridge:
+    referent_modality: visual
+    answer_modality: audio
+    uniqueness: the visuals make some sound plausible enough that its absence is informative
+    unavailable_if: the visuals set up no expectation, or the sound does occur unremarkably
