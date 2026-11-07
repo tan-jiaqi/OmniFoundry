@@ -1,0 +1,7 @@
+# M2c: task diversity. m2b put 196 of 222 attempts and 58 of 66 final questions into `temporal`, which also
+# caused 72 of 80 clue-verification failures (ordering questions cite the most clues, so one bad clue kills
+# the question). The selector now names more task types and no single type may take more than two of the
+# five slots in a video.
+extends: m2b.yaml
+tasks: {max_choices: 4}
+generate: {max_per_task: 2}

@@ -149,7 +149,10 @@ def fingerprint(cand):
 
 
 def work_items(ctx, bundle, picks):
-    """(anchor, task_id) pairs to try, best anchor first, cycling through the selected task types."""
+    """(anchor, task_id) pairs to try, best anchor first, cycling through the selected task types.
+
+    Cycling rather than grouping matters: the strongest anchors should be spread over task types, not all
+    spent on whichever type the selector named first."""
     anchors = MINERS[ctx.get("policies.anchors", "default")](bundle, ctx.get("anchors", {}))
     if not anchors:
         return [(None, t) for t in picks]
@@ -171,7 +174,11 @@ def process(ctx, bundle):
     want = int(ctx.get("generate.questions_per_video", 1))
     budget = int(ctx.get("generate.max_total_attempts", 4 * want))
     keep_soft = bool(ctx.get("generate.keep_soft_failures", True))
+    # One task type must not take every slot: temporal questions cite the most clues, so they both dominate
+    # generation and dominate clue-verification losses (m2b: 196 of 222 attempts, 72 of 80 clue failures).
+    max_per_task = int(ctx.get("generate.max_per_task", max(1, -(-want // 2))))
     out, rejected, verdicts, seen, spent, skipped = [], [], [], set(), 0, 0
+    accepted_per_task = {}
     if not picks:
         return {"rejected": [{"id": bundle["id"], "video_id": bundle["video_id"], "reason": "no_task_selected"}]}
 
@@ -179,6 +186,7 @@ def process(ctx, bundle):
         """Accept a candidate at the tier its soft failures imply."""
         tags = modality_tags(vs)
         reasons = sorted({v["reason"] for v in soft})
+        accepted_per_task[cand["task_type"]] = accepted_per_task.get(cand["task_type"], 0) + 1
         out.append({**cand, **tags, "quality": tier(reasons, tags["tags"]), "soft_failures": reasons,
                     "corroborating_modality": corroborating_modality(tags["tags"]),
                     "anchor": {k: anchor[k] for k in ("audio_ref", "score", "uniqueness", "leak")} if anchor else None})
@@ -187,6 +195,8 @@ def process(ctx, bundle):
     for anchor, task_id in work_items(ctx, bundle, picks):
         if len(out) >= want or spent >= budget:
             break
+        if accepted_per_task.get(task_id, 0) >= max_per_task:
+            continue
         task, feedback, role, attempt = tasks[task_id], [], "generator", 0
         best = None          # (candidate, verdicts, soft failures) with the fewest soft failures so far
         while True:

@@ -1,0 +1,9 @@
+# M2b: fan out over mined anchors, 5 questions per video, with bridge templates and the absence task.
+# Same 50 videos and models as m1g/m2a (captions are cache hits). Keeps m2a's calibrated media gate.
+extends: m2a.yaml
+generate:
+  questions_per_video: 5
+  max_total_attempts: 15      # per video, across all anchors and retries
+anchors:
+  max_per_event: 2
+  limit: 24

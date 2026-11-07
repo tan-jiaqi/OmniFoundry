@@ -381,6 +381,14 @@ class TestEndToEnd(unittest.TestCase):
         # the first attempt always fails grounding on purpose; what matters is that the repeat was deduped
         self.assertIn("duplicate_question", {r["reason"] for r in read_jsonl(self.tmp / "dup" / "generate" / "rejected.jsonl")})
 
+    def test_per_task_cap(self):
+        # the mock selector always names one task; with a cap of 1 only one question per video survives
+        out = self.run_cli("cap", "--set", "generate.questions_per_video=3", "--set", "generate.max_per_task=1",
+                           "--set", "verify.checks=[clue]")
+        acc = read_jsonl(self.tmp / "cap" / "generate" / "out.jsonl")
+        self.assertEqual(len(acc), 2, out)                 # 2 videos x 1 attribute question each
+        self.assertEqual({c["task_type"] for c in acc}, {"attribute"})
+
     def test_hard_failure_still_discards(self):
         out = self.run_cli("hard", "--set", "checks.clue.min_strength=0.95")
         self.assertIn("[verify] items=2", out)

@@ -100,6 +100,10 @@ Not implemented yet: the RBY (reasoning beyond video) route, the `refine` repair
 
 | m1g-001 | keep soft failures at a lower quality tier instead of discarding (`m1g.yaml`, `quality.py`) | 31 / 188 | 3 high, 10 medium, 18 low from the same 50 videos |
 
+| m2a-001 | media-gate threshold calibrated against the 31 human judgments (`m2a.yaml`) | 32 / 190 | `av_strict` 4 to 14, matching the reviewer's 15 |
+| m2b-001 | fan out over mined anchors, 5 questions per video, bridge templates (`m2b.yaml`) | 66 / 222 | per-video yield 0.63 to 1.32; `av_strict` 21; blind survival 35% to 46% |
+| m2c-001 | cap one task type at 2 of 5 slots per video (`m2c.yaml`) | 54 / 205 | diversity up (temporal 88% to 72%) but yield down; **not adopted** |
+
 Human review of m1e-001 (12/12): every answer correct, but 5 questions were answerable with the sound off,
 because the audio cue named a letter, word or name also shown on screen.
 
@@ -114,6 +118,13 @@ For comparison, OmniQA discards nothing here: its visual shortcut test shows the
 event segment (`reference/OmniReasoning/src/OmniQA/verification/modality_gate.py:425-460`), its complement
 test is inert because `segment_id` is never generated, and either test passing is enough. Our gates compare
 against the full single-modality captions and real muted / audio-only media.
+
+Human review of m1g-001 (31/31): every answer correct, 1 of 31 guessable blind. The reviewer judged 15
+questions to need both modalities where the uncalibrated gate found only 4, which is what m2a corrects.
+
+`docs/METHOD_COMPARISON.md` compares this engine with OmniReasoning/OmniQA, JointAVBench and TraceAV-Bench
+from their source: what the four have in common, how differently each one tests modality necessity (ours is
+the strictest, so yields are not directly comparable), and which of our changes measurably helped or hurt.
 
 ## Known gateway behaviour
 
